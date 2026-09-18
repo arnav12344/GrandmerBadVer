@@ -18,7 +18,46 @@ work** by the Grandmer project, drawn as inline SVG and CSS. See:
   urgent-timer pulse, and the ink-splatter burst animation
 - `index.html` — inline SVG favicon
 
-There are **no third-party image/sprite assets** in this project.
+There are **no third-party image/sprite assets** in the 2D UI layer.
+
+## 3D scene (Three.js)
+
+The game is being rebuilt as a 3D voxel scene rendered with Three.js. The
+scene splits cleanly into original code-authored geometry and one downloaded,
+openly licensed environment asset.
+
+### Original code-authored geometry (no license required)
+
+All of the following are built procedurally in TypeScript from Three.js
+primitives (BoxGeometry / CylinderGeometry / ConeGeometry) and are original
+work of the Grandmer project. No third-party model files are used for them.
+
+- **Voxel examiner / teacher character** - grouped BoxGeometry blocks (head,
+  torso, gown, arms, hands, mortarboard cap, tassel, face) with toon shading.
+  See `src/scene/voxelCharacter.ts`.
+- **3D pen (cursor-following)** - procedural cylinder body, grip band, conical
+  nib, and cap clip. See `src/scene/pen.ts`.
+- **Desk + answer paper surface** - procedural boxes (wooden desktop, front
+  lip, thin paper sheet). See `src/scene/paper.ts`.
+- **Answer token text + ink lasso loops** - token words are drawn to a
+  `CanvasTexture` (Caveat font) on procedural plane meshes, and the pen's ink
+  strokes / persistent circle loops are procedural `THREE.Line` geometry. All
+  original work. See `src/screens/marking.ts` (standard papers) and
+  `src/screens/essay.ts` (the essay free-for-all finale), which share the same
+  procedural token-sprite and ink approach on the 3D paper.
+
+### Downloaded 3D assets
+
+| Asset | Type | Use | Author | License | Source |
+| ----- | ---- | --- | ------ | ------- | ------ |
+| lythwood_room (1k HDR) | HDRI environment map | Image-based lighting + 3D background room behind the desk | Poly Haven | CC0 1.0 (public domain) | https://polyhaven.com/a/lythwood_room |
+
+The HDRI file is vendored into the repo at
+`src/scene/assets/lythwood_room_1k.hdr` (downloaded from
+`https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/1k/lythwood_room_1k.hdr`)
+and bundled by Vite so the static build is self-contained. Poly Haven assets
+are released under CC0 1.0, which places them in the public domain and requires
+no attribution; it is recorded here for transparency.
 
 ## Fonts
 

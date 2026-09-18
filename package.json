@@ -13,9 +13,11 @@
   },
   "dependencies": {
     "@fontsource/caveat": "^5.1.0",
-    "@fontsource/press-start-2p": "^5.1.0"
+    "@fontsource/press-start-2p": "^5.1.0",
+    "three": "^0.186.0"
   },
   "devDependencies": {
+    "@types/three": "^0.186.0",
     "happy-dom": "^20.14.5",
     "typescript": "^5.6.3",
     "vite": "^5.4.10",

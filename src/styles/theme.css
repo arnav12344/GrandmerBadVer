@@ -1154,3 +1154,123 @@ img,
   display: flex;
   gap: 1rem;
 }
+
+/* =========================================================================
+   FEAT-003 - 3D voxel marking scene + pixel-art HUD overlay
+   =========================================================================
+   The marking screen now renders a full Three.js examiner's-desk scene into a
+   WebGL canvas (the .scene-layer, filling the viewport behind everything). The
+   game chrome stays PIXEL-ART: the .hud sits above the canvas in the same
+   pixel palette used everywhere else. When WebGL is unavailable (no GPU /
+   happy-dom) the .scene-layer stays empty and the HUD's paper card renders the
+   tokens + SVG lasso exactly as the 2D fallback, so the loop is fully playable
+   and the smoke test drives it headlessly. */
+
+/* The 3D desk fills the screen; the canvas sits full-bleed behind the HUD. */
+.desk--marking3d {
+  position: relative;
+  min-height: 100vh;
+}
+
+/* Full-bleed WebGL canvas host, pinned behind the pixel HUD. */
+.scene-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  /* The canvas owns the pen (pointer) capture in 3D mode, so let events reach
+     it. In DOM-fallback mode the layer is empty and this is inert. */
+}
+
+.scene-layer canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  /* A pen gesture is not a text selection: block drag-to-select / touch scroll
+     so drawing a loop feels like inking, not highlighting. */
+  -webkit-user-select: none;
+  user-select: none;
+  touch-action: none;
+  cursor: crosshair;
+}
+
+/* The pixel HUD floats above the canvas. */
+.hud {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+  width: 100%;
+}
+
+/*
+ * When the 3D scene is live, the answer's TOKENS are drawn on the 3D paper by
+ * the scene and the pen inks directly on the canvas, so the HUD's own paper
+ * card recedes to a compact caption strip. The tokens themselves stay in the
+ * DOM (hidden but focusable) so keyboard marking and assistive tech keep
+ * working; they are the accessible fallback control for the WebGL pen.
+ */
+.desk--3d-on .marking__paper {
+  background: rgba(43, 32, 22, 0.55);
+  backdrop-filter: blur(1px);
+}
+
+.desk--3d-on .marking__answer {
+  /* Keep the tokens reachable by keyboard + screen readers, but let the 3D
+     paper be the primary visual. A subtle translucent panel keeps them legible
+     as a caption / fallback beneath the live scene. */
+  opacity: 0.85;
+  font-size: 1.2rem;
+}
+
+/* =========================================================================
+   FEAT-004 - 3D scene layering (marking + essay)
+   The realistic sourced HDRI room + cartoony toon-shaded voxel desk render on
+   a full-bleed WebGL canvas BEHIND a pixel-art HUD. The scene layer only holds
+   content when WebGL is available; under happy-dom / no-GPU it stays empty and
+   the HUD's own pixel paper card is the whole screen (the fallback path).
+   ========================================================================= */
+
+/* The 3D marking / essay screens position the HUD over the scene canvas. */
+.desk--marking3d {
+  position: relative;
+}
+
+/*
+ * Full-bleed WebGL canvas host. createMarkingScene appends its canvas here and
+ * sizes it to 100% of this box, so this must fill the viewport behind the HUD.
+ * aria-hidden in the markup: the accessible marking control is the DOM tokens.
+ */
+.scene-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: auto;
+}
+
+.scene-layer canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* The pixel HUD floats above the 3D canvas. */
+.desk--marking3d .hud {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+  width: 100%;
+}
+
+/*
+ * When the 3D scene is live, the pen inks directly on the canvas, so the SVG
+ * lasso layer (a DOM fallback marker) recedes visually but stays present so
+ * the `.ink-circle` marker and keyboard fallback keep working.
+ */
+.desk--3d-on .lasso-layer {
+  opacity: 0.9;
+}

@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Grandmer - 3D Scene Preview</title>
+    <meta
+      name="description"
+      content="Developer preview of the Grandmer 3D examiner's-desk scene (voxel examiner, cursor pen, HDRI room). Not part of the game flow."
+    />
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: #f3e6c8;
+        overflow: hidden;
+      }
+      #scene-root {
+        position: fixed;
+        inset: 0;
+        width: 100vw;
+        height: 100vh;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="scene-root"></div>
+    <script type="module" src="/src/scene/preview.ts"></script>
+  </body>
+</html>

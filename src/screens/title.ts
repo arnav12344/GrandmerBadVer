@@ -1,11 +1,14 @@
 /*
- * Grandmer — Title / intro screen (FEAT-003).
+ * Grandmer - Title / intro screen (FEAT-004).
  *
- * Immersive pixel-art teacher's-desk intro: you are a trained examiner racing
- * to grade a stack of student papers before exam results are due. A Start
- * button (usable by mouse AND keyboard) begins the marking run, plus a brief
- * "how to play" that mirrors the real loop: scan silently, circle suspected
- * mistakes with the red pen, flip through the stack, then finish and grade.
+ * Intro to the 3D voxel marking game: you are a trained examiner seated at a
+ * 3D examiner's desk (a real sourced HDRI study room behind a cartoony
+ * toon-shaded voxel teacher) racing to grade a stack of student papers before
+ * exam results are due. A Start button (usable by mouse AND keyboard) begins
+ * the marking run, plus a brief "how to play" that mirrors the real loop: scan
+ * silently, draw a freehand loop with the 3D pen that follows your cursor,
+ * flip through the paper stack, then finish and grade. The intro chrome and
+ * the in-game HUD stay PIXEL-ART; only the desk scene is rendered in 3D.
  * Reuses the theme classes.
  */
 
@@ -31,20 +34,21 @@ export function mountTitle(ctx: AppContext, nav: Nav): ScreenCleanup {
       <section class="paper-card">
         <p class="handwriting" style="margin-top:0;">
           Deadline approaching. A stack of student papers, riddled with
-          mistakes, waits on your desk. Grab your red pen, examiner — the exam
+          mistakes, waits on your 3D desk. Grab your pen, examiner - the exam
           results are due.
         </p>
 
         <h2 class="how-to__title">How to Play</h2>
         <ol class="how-to">
-          <li><strong>Scan</strong> the student's answer - no clues, just your trained eye.</li>
-          <li><strong>Circle</strong> anything that looks wrong: drag your red pen to draw a freehand lasso around the word.</li>
-          <li><strong>Flip</strong> through the pages of the stack to review and revise your circles.</li>
+          <li><strong>Scan</strong> the student's answer laid out on the 3D paper - no clues, just your trained eye.</li>
+          <li><strong>Circle</strong> anything that looks wrong: move your cursor and the 3D pen follows, laying down a freehand ink loop around the word.</li>
+          <li><strong>Flip</strong> through the pages of the paper stack to review and revise your circles.</li>
           <li><strong>Beat the timer</strong> and Finish &amp; Grade - only then is your marking revealed as hits, misses and false alarms.</li>
         </ol>
         <p class="how-to__note">
           No instant right or wrong while you mark. Trust your eye, ride the
           marking streak, and grade the whole stack before the clock runs down.
+          The desk is 3D and the vibe is playful; the scoreboards stay pixel.
           Good luck, examiner.
         </p>
       </section>
