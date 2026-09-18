@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import { QUESTIONS, STANDARD_QUESTIONS } from "./questions";
-import { resolveClick } from "../game/errors";
 import type { ErrorCategory } from "../game/types";
 
 describe("curated question set", () => {
@@ -29,7 +28,7 @@ describe("curated question set", () => {
     );
   });
 
-  it("every tagged error points at a valid token index", () => {
+  it("every tagged error points at a valid token index (the answer key)", () => {
     for (const q of STANDARD_QUESTIONS) {
       for (const e of q.errors) {
         expect(e.tokenIndex).toBeGreaterThanOrEqual(0);
@@ -38,24 +37,26 @@ describe("curated question set", () => {
     }
   });
 
-  it("every spelling error's dropdown includes its correct fix", () => {
+  it("no two errors in a paper target the same token", () => {
     for (const q of STANDARD_QUESTIONS) {
+      const seen = new Set<number>();
       for (const e of q.errors) {
-        if (e.kind === "spelling") {
-          expect(e.options).toBeDefined();
-          expect(e.options).toContain(e.fix);
-        }
+        expect(seen.has(e.tokenIndex)).toBe(false);
+        seen.add(e.tokenIndex);
       }
     }
   });
 
-  it("resolveClick on each tagged error returns the right interaction kind", () => {
+  it("keeps punctuation gaps as circle-able targets", () => {
+    // Every punctuation error should sit on a gap token (a missing-mark spot),
+    // which is still a token the student can lasso.
     for (const q of STANDARD_QUESTIONS) {
       for (const e of q.errors) {
-        const result = resolveClick(q, e.tokenIndex);
-        if (e.kind === "spelling") expect(result.type).toBe("spelling-dropdown");
-        if (e.kind === "punctuation") expect(result.type).toBe("punctuation-insert");
-        if (e.kind === "word") expect(result.type).toBe("word-correct");
+        if (e.category === "punctuation") {
+          const token = q.tokens[e.tokenIndex];
+          expect(token).toBeDefined();
+          expect(token.isGap).toBe(true);
+        }
       }
     }
   });

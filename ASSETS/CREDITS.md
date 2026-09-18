@@ -7,11 +7,15 @@ unlicensed art or fonts are used.
 ## Visual art / sprites
 
 All decorative pixel art (inkwell, quill, stacked books, report card, desk
-woodgrain, grade stamps, timer bar, favicon) is **hand-authored original work**
-by the Grandmer project, drawn as inline SVG and CSS. See:
+woodgrain, grade stamps, timer bar, ink splatter / combo burst, hand-drawn
+lasso ink strokes, stress-line vignette, favicon) is **hand-authored original
+work** by the Grandmer project, drawn as inline SVG and CSS. See:
 
-- `src/assets/props.ts` — inline pixel-art SVG props
-- `src/styles/theme.css` — CSS-drawn desk surface, cards, stamps, timer bar
+- `src/assets/props.ts` — inline pixel-art SVG props (inkwell/quill, stacked
+  books, report card, and the ink-splatter / combo-burst flourish)
+- `src/styles/theme.css` — CSS-drawn desk surface, cards, stamps, timer bar,
+  hand-drawn lasso ink strokes, the intensifying stress-line vignette, the
+  urgent-timer pulse, and the ink-splatter burst animation
 - `index.html` — inline SVG favicon
 
 There are **no third-party image/sprite assets** in this project.

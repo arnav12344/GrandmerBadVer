@@ -1,10 +1,19 @@
 /*
- * Grandmer — domain model (FEAT-002).
+ * Grandmer — domain model (FEAT-001 rework).
  *
  * Pure, DOM-free typed model for the "error hunt" grammar detective game.
- * The player is an examiner grading student papers: each question presents a
- * student's answer broken into selectable tokens, with a hidden set of tagged
- * errors. The UI (FEAT-003/004) renders these; nothing here touches the DOM.
+ * The player is an examiner grading student papers. Each question presents a
+ * student's answer broken into tokens with a hidden set of tagged errors.
+ *
+ * The interaction model is now CIRCLE-ONLY with DEFERRED grading: the student
+ * circles (lassos) suspected errors and gets NO instant feedback. Correctness
+ * is only computed at grading time as:
+ *  - HIT: a circle landed on a token that is a real error,
+ *  - FALSE ALARM: a circle landed on a token that is NOT an error,
+ *  - MISS: a real error that was never circled (a DERIVED grading concept, not
+ *    a recorded action).
+ * The UI (later features) renders and captures these; nothing here touches the
+ * DOM.
  */
 
 /** The five grammar skill categories the game trains. */
@@ -16,10 +25,9 @@ export type ErrorCategory =
   | "sentence-structure";
 
 /**
- * How the player fixes a given error once its location is clicked:
- * - "spelling": a dropdown of candidate spellings (one correct + distractors).
- * - "punctuation": insert a missing mark (e.g. ".", ",", "?") at the gap.
- * - "word": replace/choose the correct word (prepositions, tenses, structure).
+ * Legacy correction "kind" that only served the removed click-to-fix UI. It is
+ * no longer used for grading (grading keys purely off which tokens are errors)
+ * and is kept optional so existing data and not-yet-replaced screens compile.
  */
 export type ErrorKind = "spelling" | "punctuation" | "word";
 
@@ -35,27 +43,31 @@ export interface ResourceReference {
  * A single hidden error embedded in a student's answer.
  *
  * `tokenIndex` is the position within the question's `tokens` array that the
- * player must click. `fix` is the canonical correct answer used by checkFix.
- * For spelling errors, `options` provides the dropdown choices (the correct
- * spelling must be present among plausible distractors).
+ * student must circle. `category`, `explanation` and `resource` are the answer
+ * key plus teaching content used by grading and retry-learning.
+ *
+ * `kind`, `fix` and `options` are LEGACY fields that only served the removed
+ * correction UI. They are optional now and never consulted by grading; a spot
+ * is a real error purely by virtue of its `tokenIndex` being listed here.
  */
 export interface GrammarError {
   id: string;
   category: ErrorCategory;
-  kind: ErrorKind;
   /** Index into Question.tokens that this error applies to. */
   tokenIndex: number;
-  /** The canonical correct fix (a spelling, a mark like ".", or a word). */
-  fix: string;
-  /** Dropdown options for spelling errors (must include `fix`). */
-  options?: readonly string[];
   /** Short, non-shaming explanation of the correction. */
   explanation: string;
   /** Where to brush up on the underlying topic. */
   resource: ResourceReference;
+  /** LEGACY (unused by grading): the old correction kind. */
+  kind?: ErrorKind;
+  /** LEGACY (unused by grading): the old canonical fix. */
+  fix?: string;
+  /** LEGACY (unused by grading): the old spelling dropdown options. */
+  options?: readonly string[];
 }
 
-/** A selectable chunk of the student's answer that the player can click. */
+/** A selectable chunk of the student's answer that the player can circle. */
 export interface Token {
   /** Position in the answer, matches GrammarError.tokenIndex. */
   index: number;
@@ -63,7 +75,8 @@ export interface Token {
   text: string;
   /**
    * True when this token represents a gap where punctuation is missing rather
-   * than an existing word. Purely presentational metadata for the UI.
+   * than an existing word. A gap is still a circle-able target. Purely
+   * presentational metadata for the UI.
    */
   isGap?: boolean;
 }
@@ -78,13 +91,14 @@ export interface Question {
   prompt: string;
   /** The student's answer broken into selectable tokens. */
   tokens: readonly Token[];
-  /** The hidden errors the player is hunting for. */
+  /** The hidden errors the player is hunting for (the answer key). */
   errors: readonly GrammarError[];
 }
 
 /**
  * The final essay question: a "free-for-all" open-marking exercise with no
- * single hidden-error set. The player marks holistically; scoring is open.
+ * single hidden-error set. Circles on the essay are ungraded (it contributes
+ * no gradable errors to the run).
  */
 export interface EssayQuestion {
   kind: "essay";
@@ -106,57 +120,72 @@ export interface EssayQuestion {
 export type AnyQuestion = Question | EssayQuestion;
 
 /**
- * The outcome of a single player action against a token.
- * - "correct" / "incorrect": a graded action against a known hidden error.
- * - "miss": clicked a location that was not an error (harmless, non-shaming;
- *   only affects accuracy).
- * - "note": an ungraded observation the player makes on the essay free-for-all,
- *   where there is no answer key. Notes are recorded for the record only and
- *   must NOT feed the scored metrics (score, accuracy, combo, topic strength).
+ * The resolved outcome of a single recorded circle:
+ * - "hit": the circle enclosed a token that is a real error.
+ * - "false-alarm": the circle enclosed a token that is NOT an error.
+ *
+ * A MISS (a real error the student never circled) is a DERIVED grading concept
+ * computed from the answer key vs the recorded circles; it is never a recorded
+ * action.
  */
-export type ActionOutcome = "correct" | "incorrect" | "miss" | "note";
+export type CircleOutcome = "hit" | "false-alarm";
 
 /**
- * A recorded player action. `miss` means the player clicked a location that was
- * not an error (harmless, non-shaming — only affects accuracy). `note` is an
- * ungraded essay mark that does not feed the scored metrics. `timestamp` is
- * milliseconds (epoch or session-relative) used to compute speed.
+ * Extra, non-grading action outcomes.
+ *  - "note": an ungraded circle on the essay free-for-all (no answer key), kept
+ *    for the record and for speed timing but excluded from scored metrics.
+ *  - "correct" / "incorrect" / "miss": legacy literals from the removed
+ *    instant-check model, retained only so the existing scoring/session unit
+ *    tests keep exercising the metric helpers. Grading no longer produces them
+ *    from live play.
+ */
+export type LegacyActionOutcome = "correct" | "incorrect" | "miss" | "note";
+
+/**
+ * The outcome recorded against a token. Circle-based runs use "hit" /
+ * "false-alarm"; the essay records an inert "note" (see LegacyActionOutcome).
+ */
+export type ActionOutcome = CircleOutcome | LegacyActionOutcome;
+
+/**
+ * A recorded circle. `tokenIndex` is the token the student lassoed. `outcome`
+ * is "hit" when that token is a real error and "false-alarm" otherwise.
+ * `category` carries the error's category on a hit and is null for a false
+ * alarm (no error there). `errorId` is set only when the circle targets a real
+ * error. `timestamp` is milliseconds and is used to compute speed.
  */
 export interface RecordedAction {
   questionId: string;
-  /** Category of the targeted error; null for a miss (no error there). */
+  /** Category of the circled error; null for a false alarm (no error there). */
   category: ErrorCategory | null;
   outcome: ActionOutcome;
-  /** When the action happened, in milliseconds. */
+  /** The token the student circled. */
+  tokenIndex?: number;
+  /** When the circle happened, in milliseconds. */
   timestamp: number;
-  /** The error involved, when the action targeted a real error. */
+  /** The error involved, when the circle landed on a real error. */
   errorId?: string;
 }
-
-/** What the UI should do after a click is resolved. */
-export type ClickInteraction =
-  | { type: "spelling-dropdown"; error: GrammarError; options: readonly string[] }
-  | { type: "punctuation-insert"; error: GrammarError; expected: string }
-  | { type: "word-correct"; error: GrammarError; expected: string }
-  | { type: "miss" };
 
 /** A single entry in the retry-learning list shown on the report card. */
 export interface RetryLearningItem {
   questionId: string;
   section: string;
   category: ErrorCategory;
-  /** Plain description of what the player got wrong. */
+  /** Plain description of what went wrong (missed error or false alarm). */
   whatWasWrong: string;
   explanation: string;
   resource: ResourceReference;
 }
 
-/** Per-section score summary. */
+/** Per-section score summary (hits caught vs total errors in the section). */
 export interface SectionScore {
   section: string;
+  /** Errors caught (hits) in this section. */
   correct: number;
+  /** Total errors present in this section. */
   attempts: number;
-  /** 0..100 percentage of correct actions in the section. */
+  /** 0..100 percentage of errors caught in the section. */
   percent: number;
 }
 
@@ -166,11 +195,14 @@ export interface Grade {
   label: string;
 }
 
-/** Per-category accuracy, used to pick strongest/weakest topics. */
+/** Per-category hit rate, used to pick strongest/weakest topics. */
 export interface TopicStrength {
   category: ErrorCategory;
+  /** Errors caught (hits) in this category. */
   correct: number;
+  /** Total errors present in this category. */
   attempts: number;
+  /** correct / attempts in 0..1. */
   accuracy: number;
 }
 
@@ -188,6 +220,12 @@ export interface ReportCard {
   strongestTopic: ErrorCategory | null;
   weakestTopic: ErrorCategory | null;
   retryLearning: readonly RetryLearningItem[];
+  /** Real errors the student circled correctly. */
+  hits: number;
+  /** Real errors the student never circled. */
+  misses: number;
+  /** Circles on tokens that were not errors. */
+  falseAlarms: number;
   /** Filled in by the student on the UI; empty until signed. */
   studentSignature: string;
 }

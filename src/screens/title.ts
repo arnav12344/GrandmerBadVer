@@ -4,8 +4,9 @@
  * Immersive pixel-art teacher's-desk intro: you are a trained examiner racing
  * to grade a stack of student papers before exam results are due. A Start
  * button (usable by mouse AND keyboard) begins the marking run, plus a brief
- * "how to play" that mirrors the real loop: scan silently, click a spot, fix
- * it, beat the timer. Reuses the FEAT-001 theme classes.
+ * "how to play" that mirrors the real loop: scan silently, circle suspected
+ * mistakes with the red pen, flip through the stack, then finish and grade.
+ * Reuses the theme classes.
  */
 
 import type { AppContext, Nav, ScreenCleanup } from "../app";
@@ -36,14 +37,15 @@ export function mountTitle(ctx: AppContext, nav: Nav): ScreenCleanup {
 
         <h2 class="how-to__title">How to Play</h2>
         <ol class="how-to">
-          <li><strong>Scan</strong> the student's answer — no clues, just your trained eye.</li>
-          <li><strong>Click</strong> the spot where something looks wrong.</li>
-          <li><strong>Fix</strong> it: pick the right spelling, or drop in the missing mark.</li>
-          <li><strong>Beat the timer</strong> — grade the paper before the clock runs out.</li>
+          <li><strong>Scan</strong> the student's answer - no clues, just your trained eye.</li>
+          <li><strong>Circle</strong> anything that looks wrong: drag your red pen to draw a freehand lasso around the word.</li>
+          <li><strong>Flip</strong> through the pages of the stack to review and revise your circles.</li>
+          <li><strong>Beat the timer</strong> and Finish &amp; Grade - only then is your marking revealed as hits, misses and false alarms.</li>
         </ol>
         <p class="how-to__note">
-          No shame in a miss — every mistake is just another clue. Good luck,
-          examiner.
+          No instant right or wrong while you mark. Trust your eye, ride the
+          marking streak, and grade the whole stack before the clock runs down.
+          Good luck, examiner.
         </p>
       </section>
 

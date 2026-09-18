@@ -8,6 +8,9 @@
  *  - Strongest Topic and Weakest Topic,
  *  - Speed and Accuracy (both clearly surfaced),
  *  - Best Combo (max consecutive correct) and the bonus it added to the score,
+ *  - Circle Accuracy: HITS (real errors caught), MISSES (real errors left
+ *    uncircled), and FALSE ALARMS (circled a spot that was actually fine),
+ *    surfaced non-shamingly since grading is deferred to this screen,
  *  - Demonstrated Skills (categories the player did well at),
  *  - a Checklist of items to correct (weak categories),
  *  - Retry Learning: each wrong answer with a short explanation AND a resource
@@ -46,7 +49,7 @@ export function mountReportCard(ctx: AppContext, nav: Nav): ScreenCleanup {
   const card = buildReportCard(ctx.session, ctx.signature);
 
   // Demonstrated skills vs. checklist come from per-category performance.
-  const strengths = computeTopicStrengths(ctx.session.actions);
+  const strengths = computeTopicStrengths(ctx.session.questions, ctx.session.actions);
   const demonstrated = strengths
     .filter((s) => s.attempts > 0 && s.accuracy >= STRONG_THRESHOLD)
     .sort((a, b) => b.accuracy - a.accuracy);
@@ -114,6 +117,30 @@ export function mountReportCard(ctx: AppContext, nav: Nav): ScreenCleanup {
               <small class="report__combo-bonus">+${card.comboBonus} bonus</small>
             </span>
           </div>
+        </section>
+
+        <!-- ---- Circle accuracy: hits / misses / false alarms ---- -->
+        <section class="report__block">
+          <h2 class="report__h2">Circle Accuracy</h2>
+          <p class="report__accuracy-note">How your red-pen circles landed once the answer key was revealed.</p>
+          <div class="report__circle-stats">
+            <div class="report__circle-stat report__circle-stat--hits">
+              <span class="report__circle-value">${card.hits}</span>
+              <span class="report__circle-label">Hits</span>
+              <span class="report__circle-sub">real errors you caught</span>
+            </div>
+            <div class="report__circle-stat report__circle-stat--misses">
+              <span class="report__circle-value">${card.misses}</span>
+              <span class="report__circle-label">Misses</span>
+              <span class="report__circle-sub">errors left uncircled</span>
+            </div>
+            <div class="report__circle-stat report__circle-stat--false">
+              <span class="report__circle-value">${card.falseAlarms}</span>
+              <span class="report__circle-label">False Alarms</span>
+              <span class="report__circle-sub">circled a spot that was fine</span>
+            </div>
+          </div>
+          <p class="report__circle-cheer">${escapeHtml(circleCheer(card.hits, card.misses, card.falseAlarms))}</p>
         </section>
 
         <!-- ---- Demonstrated skills ---- -->
@@ -231,6 +258,26 @@ function retryItem(item: RetryLearningItem): string {
 /** Category label for a metric, or an em-free dash when none. */
 function topicLabel(cat: ErrorCategory | null): string {
   return cat ? CATEGORY_LABELS[cat] : "-";
+}
+
+/**
+ * A short, always-encouraging line for the circle-accuracy block. Never shames
+ * misses or false alarms; frames them as the next thing to sharpen.
+ */
+function circleCheer(hits: number, misses: number, falseAlarms: number): string {
+  if (hits === 0 && misses === 0 && falseAlarms === 0) {
+    return "No circles to grade this run. Next time, back your instinct and loop the ones that look off.";
+  }
+  if (misses === 0 && falseAlarms === 0) {
+    return "A clean sweep. Every circle landed on a real error. Sharp eye, examiner.";
+  }
+  if (falseAlarms > hits) {
+    return "Plenty of circles. Slow down a touch and trust the ones that truly read wrong.";
+  }
+  if (misses > hits) {
+    return "A few errors slipped past. Scan each line once more next run and you will catch them.";
+  }
+  return "Solid marking. Keep chasing the misses and the false alarms will settle.";
 }
 
 /** Escape text before inserting into innerHTML. */

@@ -1,57 +1,69 @@
 /*
- * Grandmer — Marking screen (FEAT-003).
+ * Grandmer - Marking screen (FEAT-002 lasso rework).
  *
- * The core gameplay loop. For each question the examiner:
- *  - reads the student's handwritten answer, rendered as clickable tokens,
- *  - clicks a spot they suspect is wrong (detective-style, no clues),
- *  - fixes it: spelling -> dropdown of corrections; punctuation -> click
- *    inserts the mark; word -> pick the correct word,
- *  - races a live countdown timer bar.
+ * The core gameplay loop, reworked from the old click-to-fix instant-check UI
+ * to a hand-drawn LASSO with DEFERRED grading. For each paper the examiner:
+ *  - reads the student's handwritten answer, rendered as positioned tokens,
+ *  - draws a freehand loop (pointer / touch drag tracing a red examiner's-pen
+ *    ink stroke) around any word or spot they suspect is wrong,
+ *  - gets NO instant right/wrong feedback (grading is revealed only at the end),
+ *  - can FLIP back and forth through the whole paper stack to review and revise
+ *    before finishing.
  *
- * When the timer expires (or the player ticks "Next"), the question is locked,
- * graded via scoring.ts (a wax-red grade stamp appears), brief non-shaming
- * feedback highlights the error types involved, then the run advances. The
- * FINAL question is an essay "free-for-all" delegated to the essay mode.
+ * A word is circled when the loop encloses or substantially overlaps it, decided
+ * by the pure resolveLasso (src/game/lasso.ts) fed the tokens' REAL measured
+ * boxes at pointerup. Re-lassoing an already-circled word removes that circle.
+ * Circles persist per paper and re-render (as red ink strokes) when the student
+ * flips back. A prominent per-paper timer adds speed pressure; when time runs
+ * low the desk gets "stress lines". A Finish & Grade action and per-paper timer
+ * expiry both end the stack and navigate to the report card.
  *
- * All state transitions go through session.ts; the countdown itself is a UI
- * concern and every timer is cleared between questions (no leaked intervals).
+ * Game feel: a marking "momentum" streak builds as the examiner circles quickly,
+ * popping combo callouts and shaking the desk, and stress lines close in as the
+ * clock drains. None of this reveals whether a circle was right or wrong - that
+ * stays hidden until the report card.
+ *
+ * All state transitions go through the pure session helpers; the countdown and
+ * pointer capture are UI concerns and everything (timers, listeners, capture
+ * layer) is torn down in the returned cleanup - no leaks between papers.
  */
 
 import type { AppContext, Nav, ScreenCleanup } from "../app";
-import type {
-  AnyQuestion,
-  ClickInteraction,
-  ErrorCategory,
-  GrammarError,
-  Question,
-  RecordedAction,
-  Token,
-} from "../game/types";
-import { resolveClick, checkFix } from "../game/errors";
+import type { AnyQuestion, Question, Token } from "../game/types";
+import type { Point, WordBox } from "../game/lasso";
+import { resolveLasso } from "../game/lasso";
+import { inkSplatSvg } from "../assets/props";
 import {
-  applyAction,
+  circledTokens,
   currentQuestion,
-  gradeAndAdvance,
-  gradeForQuestion,
+  finishRun,
+  goToQuestion,
+  toggleCircle,
 } from "../game/session";
 import { mountEssay } from "./essay";
 
-/** Seconds granted per standard question (comfortable for a demo). */
+/** Seconds granted per standard paper (comfortable for a demo). */
 const QUESTION_SECONDS = 30;
 
-/** Human-friendly labels for each grammar category (used in feedback). */
-const CATEGORY_LABELS: Record<ErrorCategory, string> = {
-  preposition: "prepositions",
-  tense: "verb tenses",
-  spelling: "spelling",
-  punctuation: "punctuation",
-  "sentence-structure": "sentence structure",
-};
+/** Below this fraction of time left the desk shows "stress lines". */
+const STRESS_THRESHOLD = 0.35;
+
+/** Seconds remaining at or below which the timer turns amber (tension rising). */
+const AMBER_SECONDS = 15;
+
+/** Seconds remaining at or below which the timer pulses red ("urgent"). */
+const URGENT_SECONDS = 10;
+
+/** Seconds remaining at or below which the pulse accelerates ("critical"). */
+const CRITICAL_SECONDS = 5;
+
+/** Max ms between two circles for them to count toward a momentum streak. */
+const MOMENTUM_WINDOW_MS = 4000;
 
 export function mountMarking(ctx: AppContext, nav: Nav): ScreenCleanup {
   const question = currentQuestion(ctx.session);
 
-  // No question left -> straight to the report card (defensive).
+  // No paper left -> straight to the report card (defensive).
   if (!question) {
     nav.go("reportCard");
     return undefined;
@@ -70,24 +82,34 @@ function mountStandardQuestion(
   nav: Nav,
   question: Question,
 ): ScreenCleanup {
-  // ---- Per-question mutable UI state ----
-  const questionStart = Date.now();
-  let remainingMs = QUESTION_SECONDS * 1000;
-  let locked = false;
+  // ---- Per-paper mutable UI state ----
+  // Per-paper timer that does NOT reset when flipping back: we remember how much
+  // time each paper had left, keyed by question id, on the shared session-scoped
+  // context. Flipping back to an already-seen paper resumes its remaining time
+  // rather than granting a fresh 30s (a coherent, non-exploitable rule).
+  const clocks = getClockStore(ctx);
+  let remainingMs = clocks[question.id] ?? QUESTION_SECONDS * 1000;
+
+  let ended = false;
   let tickHandle: number | undefined;
+  let momentumTimer: number | undefined;
   const disposers: Array<() => void> = [];
 
-  // Which errors have already been resolved (so re-clicking doesn't double-count).
-  const resolvedErrorIds = new Set<string>();
-  // Open popover cleanup (only one dropdown at a time).
-  let closePopover: (() => void) | undefined;
+  // Momentum streak: how many circles were made within MOMENTUM_WINDOW_MS of
+  // each other. Purely about marking rhythm, never about correctness.
+  let momentum = 0;
+  let lastCircleAt = 0;
 
-  // Progress label: q index / total, essay excluded from the count wording.
   const total = ctx.session.questions.length;
   const number = ctx.session.currentIndex + 1;
+  const isFirst = ctx.session.currentIndex === 0;
+  // The last non-essay flip target; the final paper is the essay, so "next"
+  // from the last standard paper simply moves into the essay via the router.
 
   ctx.root.innerHTML = `
-    <main class="desk desk--marking">
+    <main class="desk desk--marking" id="marking-desk">
+      <div class="stress-lines" id="stress-lines" aria-hidden="true"></div>
+
       <header class="marking__bar">
         <span class="marking__section">${escapeHtml(question.section)}</span>
         <span class="marking__count">Paper ${number} / ${total}</span>
@@ -99,209 +121,397 @@ function mountStandardQuestion(
       </p>
 
       <section class="paper-card marking__paper">
-        <p class="marking__hint">Student's answer — find and fix the mistakes.</p>
-        <p class="handwriting marking__answer" id="answer"></p>
+        <p class="marking__hint">Student's answer - circle anything that looks wrong. Draw a loop with your pen.</p>
+        <div class="lasso-stage" id="lasso-stage">
+          <p class="handwriting marking__answer" id="answer"></p>
+          <svg class="lasso-layer" id="lasso-layer" aria-hidden="true"
+               xmlns="http://www.w3.org/2000/svg"></svg>
+        </div>
       </section>
 
       <div class="marking__timer">
-        <div class="timer-bar" role="timer" aria-label="time remaining">
+        <div class="timer-bar" id="timer-bar" role="timer" aria-label="time remaining">
           <div class="timer-bar__fill" id="timer-fill" style="width:100%"></div>
         </div>
-        <span class="marking__seconds" id="seconds">${QUESTION_SECONDS}s</span>
+        <span class="marking__seconds" id="seconds">${Math.ceil(remainingMs / 1000)}s</span>
+      </div>
+
+      <div class="marking__pager">
+        <button class="btn btn--ghost" id="prev-btn" type="button" ${isFirst ? "disabled" : ""}>← Prev paper</button>
+        <span class="combo-meter" id="combo-meter" aria-live="polite" title="How fast you are marking, not whether a circle was right"></span>
+        <button class="btn btn--ghost" id="next-btn" type="button">Next paper →</button>
       </div>
 
       <div class="marking__actions">
-        <button class="btn btn--brass" id="next-btn" type="button">Tick &amp; Grade →</button>
+        <button class="btn btn--brass" id="finish-btn" type="button">Finish &amp; Grade →</button>
       </div>
 
       <div class="marking__feedback" id="feedback" aria-live="polite"></div>
     </main>
   `;
 
+  const deskEl = ctx.root.querySelector<HTMLElement>("#marking-desk")!;
+  const stressEl = ctx.root.querySelector<HTMLElement>("#stress-lines")!;
+  const stageEl = ctx.root.querySelector<HTMLElement>("#lasso-stage")!;
   const answerEl = ctx.root.querySelector<HTMLElement>("#answer")!;
+  const layerEl = ctx.root.querySelector<SVGSVGElement>("#lasso-layer")!;
   const fillEl = ctx.root.querySelector<HTMLElement>("#timer-fill")!;
   const secondsEl = ctx.root.querySelector<HTMLElement>("#seconds")!;
+  const prevBtn = ctx.root.querySelector<HTMLButtonElement>("#prev-btn")!;
   const nextBtn = ctx.root.querySelector<HTMLButtonElement>("#next-btn")!;
+  const finishBtn = ctx.root.querySelector<HTMLButtonElement>("#finish-btn")!;
+  const comboEl = ctx.root.querySelector<HTMLElement>("#combo-meter")!;
   const feedbackEl = ctx.root.querySelector<HTMLElement>("#feedback")!;
 
-  // ---- Render tokens ----
-  renderTokens(answerEl, question.tokens, onTokenClick);
+  // ---- Render tokens (keyboard-toggleable fallback) ----
+  const tokenEls = new Map<number, HTMLElement>();
+  renderTokens(answerEl, question.tokens, tokenEls, onTokenKeyToggle);
+
+  // Draw whatever circles already exist for this paper (persist across flips).
+  renderExistingCircles();
 
   // ---- Timer ----
+  // The timer treatment escalates in urgency as the clock drains:
+  //   calm -> amber -> red pulse (<= URGENT_SECONDS) -> accelerating pulse
+  //   (<= CRITICAL_SECONDS). Crossing a threshold gives the desk a brief shake
+  //   so the moment lands. None of this reveals correctness; it is pure tempo.
+  const timerBarEl = ctx.root.querySelector<HTMLElement>("#timer-bar")!;
   const startedAt = Date.now();
+  let urgencyLevel = 0; // 0 calm, 1 amber, 2 urgent, 3 critical
   tickHandle = window.setInterval(() => {
     const elapsed = Date.now() - startedAt;
-    remainingMs = Math.max(0, QUESTION_SECONDS * 1000 - elapsed);
-    const pct = (remainingMs / (QUESTION_SECONDS * 1000)) * 100;
-    fillEl.style.width = `${pct}%`;
-    const secs = Math.ceil(remainingMs / 1000);
-    secondsEl.textContent = `${secs}s`;
-    if (remainingMs <= 0) {
-      lockAndGrade();
+    const shown = Math.max(0, remainingMs - elapsed);
+    const pct = (shown / (QUESTION_SECONDS * 1000)) * 100;
+    fillEl.style.width = `${Math.max(0, pct)}%`;
+    secondsEl.textContent = `${Math.ceil(shown / 1000)}s`;
+    const secondsLeft = shown / 1000;
+
+    // Escalate the timer's urgency in steps, shaking the desk on each new step.
+    const nextLevel =
+      secondsLeft <= CRITICAL_SECONDS
+        ? 3
+        : secondsLeft <= URGENT_SECONDS
+          ? 2
+          : secondsLeft <= AMBER_SECONDS
+            ? 1
+            : 0;
+    if (nextLevel !== urgencyLevel) {
+      if (nextLevel > urgencyLevel && nextLevel >= 2) bumpDesk();
+      urgencyLevel = nextLevel;
+    }
+    timerBarEl.classList.toggle("timer-bar--amber", urgencyLevel === 1);
+    timerBarEl.classList.toggle("timer-bar--urgent", urgencyLevel === 2);
+    timerBarEl.classList.toggle("timer-bar--critical", urgencyLevel >= 3);
+
+    // Stress lines close in AND intensify as the clock drains: below the stress
+    // threshold, ramp a 0..1 intensity that CSS maps to opacity/thickness so it
+    // is a visible build-up, not a binary on/off.
+    const frac = shown / (QUESTION_SECONDS * 1000);
+    if (frac <= STRESS_THRESHOLD) {
+      const intensity =
+        STRESS_THRESHOLD <= 0
+          ? 1
+          : Math.min(1, (STRESS_THRESHOLD - frac) / STRESS_THRESHOLD);
+      stressEl.classList.add("stress-lines--on");
+      stressEl.style.setProperty("--stress", intensity.toFixed(3));
+      deskEl.classList.add("desk--stressed");
+    } else {
+      stressEl.classList.remove("stress-lines--on");
+      stressEl.style.setProperty("--stress", "0");
+      deskEl.classList.remove("desk--stressed");
+    }
+    if (shown <= 0) {
+      // This paper's time is up -> finish the whole stack and grade.
+      persistClock(0);
+      finishAndGrade();
     }
   }, 100);
 
-  nextBtn.addEventListener("click", () => lockAndGrade());
+  // ---- Pointer lasso capture ----
+  let drawing = false;
+  let points: Point[] = [];
+  let pointerId: number | undefined;
+  let liveStroke: SVGPolylineElement | undefined;
 
-  // ---- Token click handler ----
-  function onTokenClick(tokenEl: HTMLElement, token: Token): void {
-    if (locked) return;
-    closePopover?.();
+  function localPoint(ev: PointerEvent): Point {
+    const rect = stageEl.getBoundingClientRect();
+    return { x: ev.clientX - rect.left, y: ev.clientY - rect.top };
+  }
 
-    const interaction = resolveClick(question, token.index);
-
-    switch (interaction.type) {
-      case "spelling-dropdown":
-        openSpellingDropdown(tokenEl, interaction);
-        break;
-      case "punctuation-insert":
-        handlePunctuation(tokenEl, interaction.error);
-        break;
-      case "word-correct":
-        openWordDropdown(tokenEl, interaction.error);
-        break;
-      case "miss":
-        registerMiss(tokenEl);
-        break;
+  const onPointerDown = (ev: PointerEvent): void => {
+    if (ended) return;
+    // Ignore clicks that start on a control (buttons live outside the stage,
+    // but guard anyway) and non-primary buttons.
+    if (ev.button !== undefined && ev.button !== 0) return;
+    drawing = true;
+    pointerId = ev.pointerId;
+    points = [localPoint(ev)];
+    try {
+      stageEl.setPointerCapture(ev.pointerId);
+    } catch {
+      // happy-dom / older browsers may not implement pointer capture; ignore.
     }
-  }
+    liveStroke = beginLiveStroke();
+    ev.preventDefault();
+  };
 
-  // ---- Spelling: dropdown popover of options ----
-  function openSpellingDropdown(
-    tokenEl: HTMLElement,
-    interaction: Extract<ClickInteraction, { type: "spelling-dropdown" }>,
-  ): void {
-    if (resolvedErrorIds.has(interaction.error.id)) return;
-    const options = shuffle([...interaction.options]);
-    const pop = buildPopover();
-    for (const opt of options) {
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "popover__opt";
-      btn.textContent = opt;
-      btn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        const correct = checkFix(interaction.error, opt);
-        applyFix(tokenEl, interaction.error, correct, opt);
-        closePopover?.();
-      });
-      pop.appendChild(btn);
+  const onPointerMove = (ev: PointerEvent): void => {
+    if (!drawing || ev.pointerId !== pointerId) return;
+    points.push(localPoint(ev));
+    if (liveStroke) {
+      liveStroke.setAttribute("points", pointsToAttr(points));
     }
-    showPopover(tokenEl, pop);
-  }
+    ev.preventDefault();
+  };
 
-  // ---- Word errors (prepositions/tenses/structure): pick the fix ----
-  function openWordDropdown(tokenEl: HTMLElement, error: GrammarError): void {
-    if (resolvedErrorIds.has(error.id)) return;
-    // Build plausible choices around the correct fix from the original word.
-    const original = tokenEl.dataset.text ?? "";
-    const choices = shuffle(
-      Array.from(new Set([error.fix, original, ...wordDistractors(error)])),
-    ).slice(0, 4);
-    if (!choices.includes(error.fix)) choices[0] = error.fix;
-
-    const pop = buildPopover();
-    for (const opt of choices) {
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "popover__opt";
-      btn.textContent = opt;
-      btn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        const correct = checkFix(error, opt);
-        applyFix(tokenEl, error, correct, opt);
-        closePopover?.();
-      });
-      pop.appendChild(btn);
+  const onPointerUp = (ev: PointerEvent): void => {
+    if (!drawing || ev.pointerId !== pointerId) return;
+    drawing = false;
+    try {
+      stageEl.releasePointerCapture(ev.pointerId);
+    } catch {
+      /* ignore */
     }
-    showPopover(tokenEl, pop);
-  }
-
-  // ---- Punctuation: a click drops the missing mark straight in ----
-  function handlePunctuation(tokenEl: HTMLElement, error: GrammarError): void {
-    if (resolvedErrorIds.has(error.id)) return;
-    // Inserting the mark IS the fix for a punctuation gap.
-    tokenEl.textContent = error.fix;
-    applyFix(tokenEl, error, true, error.fix);
-  }
-
-  // ---- A harmless, non-shaming miss ----
-  function registerMiss(tokenEl: HTMLElement): void {
-    record({
-      questionId: question.id,
-      category: null,
-      outcome: "miss",
-      timestamp: Date.now(),
-    });
-    // Gentle "nothing wrong here" nudge — no scary red.
-    tokenEl.classList.remove("token--miss");
-    // Force reflow so the animation can retrigger on rapid clicks.
-    void tokenEl.offsetWidth;
-    tokenEl.classList.add("token--miss");
-    flashFeedback("Nothing wrong there — trust your instincts and keep scanning.");
-  }
-
-  // ---- Apply a resolved fix, mark the token, record the action ----
-  function applyFix(
-    tokenEl: HTMLElement,
-    error: GrammarError,
-    correct: boolean,
-    _submitted: string,
-  ): void {
-    resolvedErrorIds.add(error.id);
-    tokenEl.classList.remove("token--correct", "token--wrong");
-    tokenEl.classList.add(correct ? "token--correct" : "token--wrong");
-    tokenEl.classList.add("token--resolved");
-    // Once resolved, the spot is no longer clickable.
-    tokenEl.setAttribute("aria-disabled", "true");
-
-    record({
-      questionId: question.id,
-      category: error.category,
-      outcome: correct ? "correct" : "incorrect",
-      timestamp: Date.now(),
-      errorId: error.id,
-    });
-
-    if (correct) {
-      flashFeedback(`Good catch! ${error.explanation}`);
-    } else {
-      // Non-shaming: show it's noted, reveal the intended fix gently.
-      flashFeedback(`Noted. The mark scheme expected "${error.fix}". ${error.explanation}`);
+    // Remove the transient live stroke; persistent strokes are re-derived below.
+    if (liveStroke && liveStroke.parentNode) {
+      liveStroke.parentNode.removeChild(liveStroke);
     }
-  }
+    liveStroke = undefined;
+    resolveStroke(points);
+    points = [];
+    pointerId = undefined;
+    ev.preventDefault();
+  };
 
-  // ---- Record through the pure session state ----
-  function record(action: RecordedAction): void {
-    ctx.session = applyAction(ctx.session, action);
-  }
+  stageEl.addEventListener("pointerdown", onPointerDown);
+  stageEl.addEventListener("pointermove", onPointerMove);
+  stageEl.addEventListener("pointerup", onPointerUp);
+  stageEl.addEventListener("pointercancel", onPointerUp);
+  disposers.push(() => {
+    stageEl.removeEventListener("pointerdown", onPointerDown);
+    stageEl.removeEventListener("pointermove", onPointerMove);
+    stageEl.removeEventListener("pointerup", onPointerUp);
+    stageEl.removeEventListener("pointercancel", onPointerUp);
+  });
 
-  // ---- Popover plumbing ----
-  function buildPopover(): HTMLElement {
-    const pop = document.createElement("div");
-    pop.className = "popover";
-    return pop;
-  }
+  // ---- Pager + finish ----
+  prevBtn.addEventListener("click", () => flip(ctx.session.currentIndex - 1));
+  nextBtn.addEventListener("click", () => flip(ctx.session.currentIndex + 1));
+  finishBtn.addEventListener("click", () => finishAndGrade());
 
-  function showPopover(anchor: HTMLElement, pop: HTMLElement): void {
-    // Position relative to the token via a wrapper.
-    anchor.classList.add("token--active");
-    anchor.appendChild(pop);
+  // ---- Resolve a completed freehand stroke into circle toggles ----
+  function resolveStroke(loop: readonly Point[]): void {
+    if (ended) return;
+    // Need a real loop to enclose anything.
+    if (loop.length < 3) return;
 
-    const onDocClick = (e: MouseEvent): void => {
-      if (!pop.contains(e.target as Node) && e.target !== anchor) {
-        closePopover?.();
+    const boxes = measureTokenBoxes();
+    const enclosed = resolveLasso(loop, boxes);
+    if (enclosed.length === 0) {
+      flashFeedback("No word caught in that loop - try circling closer.");
+      return;
+    }
+
+    let added = 0;
+    let removed = 0;
+    let lastAddedIndex = -1;
+    const before = new Set(circledTokens(ctx.session, question.id));
+    for (const idx of enclosed) {
+      ctx.session = toggleCircle(ctx.session, idx, Date.now());
+      if (before.has(idx)) removed += 1;
+      else {
+        added += 1;
+        lastAddedIndex = idx;
       }
-    };
-    // Defer so the opening click doesn't immediately close it.
-    window.setTimeout(() => document.addEventListener("click", onDocClick), 0);
+    }
 
-    closePopover = () => {
-      document.removeEventListener("click", onDocClick);
-      anchor.classList.remove("token--active");
-      if (pop.parentNode) pop.parentNode.removeChild(pop);
-      closePopover = undefined;
-    };
+    renderExistingCircles();
+
+    // Momentum only counts when the loop ADDED at least one new circle.
+    if (added > 0) {
+      const now = Date.now();
+      if (now - lastCircleAt <= MOMENTUM_WINDOW_MS) {
+        momentum += 1;
+      } else {
+        momentum = 1;
+      }
+      lastCircleAt = now;
+      showCombo();
+      if (momentum >= 2) bumpDesk();
+      splatAtToken(lastAddedIndex);
+      resetMomentumDecay();
+    }
+
+    if (added > 0 && removed === 0) {
+      flashFeedback(pickInkLine());
+    } else if (removed > 0 && added === 0) {
+      flashFeedback("Rubbed that circle out. Change of heart, examiner?");
+    } else if (added > 0 && removed > 0) {
+      flashFeedback("Reworked your marks on that spot.");
+    }
+  }
+
+  // ---- Keyboard fallback: Enter/Space toggles the focused token ----
+  function onTokenKeyToggle(tokenIndex: number): void {
+    if (ended) return;
+    const before = new Set(circledTokens(ctx.session, question.id));
+    ctx.session = toggleCircle(ctx.session, tokenIndex, Date.now());
+    renderExistingCircles();
+    if (!before.has(tokenIndex)) {
+      const now = Date.now();
+      momentum = now - lastCircleAt <= MOMENTUM_WINDOW_MS ? momentum + 1 : 1;
+      lastCircleAt = now;
+      showCombo();
+      if (momentum >= 2) bumpDesk();
+      splatAtToken(tokenIndex);
+      resetMomentumDecay();
+      flashFeedback(pickInkLine());
+    } else {
+      flashFeedback("Rubbed that circle out. Change of heart, examiner?");
+    }
+  }
+
+  // ---- Measure each token's box relative to the capture layer ----
+  function measureTokenBoxes(): WordBox[] {
+    const stageRect = stageEl.getBoundingClientRect();
+    const boxes: WordBox[] = [];
+    for (const [index, el] of tokenEls) {
+      const r = el.getBoundingClientRect();
+      boxes.push({
+        index,
+        x: r.left - stageRect.left,
+        y: r.top - stageRect.top,
+        width: r.width,
+        height: r.height,
+      });
+    }
+    return boxes;
+  }
+
+  // ---- Re-derive and draw persistent ink circles from the session ----
+  function renderExistingCircles(): void {
+    // Clear existing persistent strokes.
+    while (layerEl.firstChild) layerEl.removeChild(layerEl.firstChild);
+
+    const stageRect = stageEl.getBoundingClientRect();
+    layerEl.setAttribute(
+      "viewBox",
+      `0 0 ${Math.max(1, stageRect.width)} ${Math.max(1, stageRect.height)}`,
+    );
+
+    const circled = new Set(circledTokens(ctx.session, question.id));
+    for (const [index, el] of tokenEls) {
+      const marked = circled.has(index);
+      el.classList.toggle("token--circled", marked);
+      el.setAttribute("aria-pressed", marked ? "true" : "false");
+      if (!marked) continue;
+      const r = el.getBoundingClientRect();
+      drawInkCircle(
+        r.left - stageRect.left,
+        r.top - stageRect.top,
+        r.width,
+        r.height,
+        index,
+      );
+    }
+  }
+
+  /** Draw a hand-drawn, slightly rough red ink ellipse around a token box. */
+  function drawInkCircle(
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+    seed: number,
+  ): void {
+    const padX = Math.max(6, w * 0.18);
+    const padY = Math.max(5, h * 0.35);
+    const cx = x + w / 2;
+    const cy = y + h / 2;
+    const rx = w / 2 + padX;
+    const ry = h / 2 + padY;
+    const path = document.createElementNS(
+      "http://www.w3.org/2000/svg",
+      "path",
+    );
+    path.setAttribute("class", "ink-circle");
+    path.setAttribute("d", roughEllipsePath(cx, cy, rx, ry, seed));
+    layerEl.appendChild(path);
+  }
+
+  // ---- Transient live stroke while dragging ----
+  function beginLiveStroke(): SVGPolylineElement {
+    const poly = document.createElementNS(
+      "http://www.w3.org/2000/svg",
+      "polyline",
+    );
+    poly.setAttribute("class", "ink-stroke");
+    layerEl.appendChild(poly);
+    return poly;
+  }
+
+  // ---- Momentum / combo callout ----
+  // Labelled HONESTLY: this is a marking-streak / tempo meter (how fast you are
+  // circling), NOT a reveal of whether any circle was right. Grading is
+  // deferred; the true consecutive-HIT Best Combo appears on the report card.
+  function showCombo(): void {
+    if (momentum >= 2) {
+      comboEl.textContent = `Marking Streak x${momentum}`;
+      comboEl.classList.remove("combo-meter--pop");
+      void comboEl.offsetWidth; // reflow so the pop animation retriggers
+      comboEl.classList.add("combo-meter--pop");
+    } else {
+      comboEl.textContent = "";
+    }
+  }
+
+  // ---- Ink-splatter / combo-burst flourish on a marking moment ----
+  // A short-lived decorative red splatter dropped near the circled word. It is
+  // purely atmospheric (pointer-events:none so it never blocks the lasso layer)
+  // and carries NO correctness meaning.
+  const splatTimers = new Set<number>();
+  function burstInkSplat(x: number, y: number): void {
+    const splat = document.createElement("div");
+    splat.className = "ink-splat";
+    splat.setAttribute("aria-hidden", "true");
+    splat.style.left = `${x}px`;
+    splat.style.top = `${y}px`;
+    // A bigger streak throws a bigger splatter, capped so it stays tasteful.
+    const scale = Math.min(1.5, 0.7 + momentum * 0.18);
+    splat.style.setProperty("--splat-scale", scale.toFixed(2));
+    splat.innerHTML = inkSplatSvg;
+    stageEl.appendChild(splat);
+    const handle = window.setTimeout(() => {
+      splatTimers.delete(handle);
+      if (splat.parentNode) splat.parentNode.removeChild(splat);
+    }, 650);
+    splatTimers.add(handle);
+  }
+
+  /** Throw an ink splatter over a token, positioned relative to the stage. */
+  function splatAtToken(tokenIndex: number): void {
+    const el = tokenEls.get(tokenIndex);
+    if (!el) return;
+    const stageRect = stageEl.getBoundingClientRect();
+    const r = el.getBoundingClientRect();
+    burstInkSplat(
+      r.left - stageRect.left + r.width / 2,
+      r.top - stageRect.top + r.height / 2,
+    );
+  }
+
+  function bumpDesk(): void {
+    deskEl.classList.remove("desk--shake");
+    void deskEl.offsetWidth;
+    deskEl.classList.add("desk--shake");
+  }
+
+  function resetMomentumDecay(): void {
+    if (momentumTimer) window.clearTimeout(momentumTimer);
+    momentumTimer = window.setTimeout(() => {
+      momentum = 0;
+      comboEl.textContent = "";
+    }, MOMENTUM_WINDOW_MS);
   }
 
   // ---- Transient feedback line ----
@@ -312,167 +522,180 @@ function mountStandardQuestion(
     if (feedbackTimer) window.clearTimeout(feedbackTimer);
     feedbackTimer = window.setTimeout(() => {
       feedbackEl.classList.remove("marking__feedback--show");
-    }, 3500);
+    }, 3000);
   }
 
-  // ---- Lock the question, grade it, show the stamp, then advance ----
-  function lockAndGrade(): void {
-    if (locked) return;
-    locked = true;
-    closePopover?.();
-    stopTimer();
-
-    const elapsed = Date.now() - questionStart;
-    const grade = gradeForQuestion(
-      // gradeForQuestion reads recorded actions already in the session.
-      ctx.session,
-      question.id,
-    );
-
-    // Advance the pure session (records elapsed, moves the index).
-    ctx.session = gradeAndAdvance(ctx.session, elapsed);
-
-    showGradeOverlay(grade.grade, grade.label, question);
+  // ---- Save remaining time for this paper (so flipping back resumes it) ----
+  function persistClock(value?: number): void {
+    const shown =
+      value !== undefined
+        ? value
+        : Math.max(0, remainingMs - (Date.now() - startedAt));
+    clocks[question.id] = shown;
   }
 
-  function stopTimer(): void {
+  function stopTimers(): void {
     if (tickHandle !== undefined) {
       window.clearInterval(tickHandle);
       tickHandle = undefined;
     }
+    if (momentumTimer !== undefined) {
+      window.clearTimeout(momentumTimer);
+      momentumTimer = undefined;
+    }
+    if (feedbackTimer !== undefined) {
+      window.clearTimeout(feedbackTimer);
+      feedbackTimer = undefined;
+    }
+    for (const handle of splatTimers) window.clearTimeout(handle);
+    splatTimers.clear();
   }
 
-  // ---- Grade stamp + per-question feedback, then continue ----
-  function showGradeOverlay(
-    grade: string,
-    label: string,
-    q: Question,
-  ): void {
-    // Which categories appeared in this paper (for the feedback line).
-    const cats = Array.from(new Set(q.errors.map((e) => e.category)));
-    const catText = cats.map((c) => CATEGORY_LABELS[c]).join(", ");
-
-    // How the player did on this paper (encouraging phrasing).
-    const acts = ctx.session.actions.filter(
-      (a) => a.questionId === q.id && a.outcome !== "miss",
-    );
-    const got = acts.filter((a) => a.outcome === "correct").length;
-    const totalErrors = q.errors.length;
-
-    const overlay = document.createElement("div");
-    overlay.className = "grade-overlay";
-    overlay.innerHTML = `
-      <div class="grade-overlay__card">
-        <span class="grade-stamp grade-overlay__stamp">${escapeHtml(grade)} ${escapeHtml(label)}</span>
-        <p class="grade-overlay__caught">You caught <strong>${got}</strong> of <strong>${totalErrors}</strong> errors.</p>
-        <p class="grade-overlay__cats">This paper tested: <strong>${escapeHtml(catText)}</strong>.</p>
-        <p class="grade-overlay__note">${encouragement(got, totalErrors)}</p>
-        <button class="btn btn--brass" id="continue-btn" type="button">Next Paper →</button>
-      </div>
-    `;
-    ctx.root.appendChild(overlay);
-
-    const contBtn = overlay.querySelector<HTMLButtonElement>("#continue-btn")!;
-    const goNext = (): void => {
-      if (ctx.session.finished) {
-        nav.go("reportCard");
-      } else {
-        // Re-mount the marking screen for the next question.
-        nav.go("marking");
-      }
-    };
-    contBtn.addEventListener("click", goNext);
-    contBtn.focus();
-
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key === "Enter") {
-        e.preventDefault();
-        goNext();
-      }
-    };
-    document.addEventListener("keydown", onKey);
-    disposers.push(() => document.removeEventListener("keydown", onKey));
+  // ---- Flip to another paper WITHOUT grading ----
+  function flip(index: number): void {
+    if (ended) return;
+    if (index < 0 || index >= ctx.session.questions.length) return;
+    if (index === ctx.session.currentIndex) return;
+    persistClock();
+    stopTimers();
+    // goToQuestion accumulates elapsed on the paper we leave; we track the clock
+    // ourselves, so pass 0 to avoid double counting and just move the index.
+    ctx.session = goToQuestion(ctx.session, index, 0);
+    // Re-mount the marking screen for the target paper (handles essay hand-off).
+    nav.go("marking");
   }
 
-  // ---- Cleanup: clear all timers/listeners between questions ----
+  // ---- Finish the whole stack and reveal grading on the report card ----
+  function finishAndGrade(): void {
+    if (ended) return;
+    ended = true;
+    // A brief shake punctuates finishing the paper stack (a key moment).
+    bumpDesk();
+    persistClock();
+    stopTimers();
+    const elapsed = Date.now() - startedAt;
+    ctx.session = finishRun(ctx.session, elapsed);
+    nav.go("reportCard");
+  }
+
+  // ---- Cleanup: clear all timers/listeners between papers ----
   return () => {
-    stopTimer();
-    if (feedbackTimer) window.clearTimeout(feedbackTimer);
-    closePopover?.();
+    stopTimers();
     for (const d of disposers) d();
   };
 }
 
-/** Render tokens into the answer element, wiring click + keyboard. */
+/**
+ * Per-run store of remaining time per paper, keyed by question id. It must
+ * survive the screen re-mounts that happen as the student flips between papers
+ * (so a paper resumes its remaining time instead of getting a fresh 30s), yet
+ * reset when a brand-new run starts.
+ *
+ * The AppContext object is stable across a whole app lifetime (Play Again keeps
+ * the same ctx but swaps in a fresh session), so we hang the store off the ctx
+ * via a WeakMap and reset it whenever we detect the start of a fresh run: the
+ * session has recorded no actions, no elapsed time, and sits on the first paper.
+ */
+interface ClockEntry {
+  store: Record<string, number>;
+}
+const CLOCKS = new WeakMap<object, ClockEntry>();
+function getClockStore(ctx: AppContext): Record<string, number> {
+  const key = ctx as unknown as object;
+  const freshRun =
+    ctx.session.currentIndex === 0 &&
+    ctx.session.actions.length === 0 &&
+    Object.keys(ctx.session.elapsedByQuestion).length === 0;
+  let entry = CLOCKS.get(key);
+  if (!entry || freshRun) {
+    entry = { store: {} };
+    CLOCKS.set(key, entry);
+  }
+  return entry.store;
+}
+
+/** Render tokens into the answer element, wiring a keyboard toggle fallback. */
 function renderTokens(
   target: HTMLElement,
   tokens: readonly Token[],
-  onClick: (el: HTMLElement, token: Token) => void,
+  tokenEls: Map<number, HTMLElement>,
+  onKeyToggle: (tokenIndex: number) => void,
 ): void {
   target.innerHTML = "";
+  tokenEls.clear();
   for (const token of tokens) {
     const el = document.createElement("span");
-    // A punctuation gap must look exactly like ordinary spacing between words —
-    // no dashed slot, no marker — so the player has to notice the sentence is
-    // missing a mark rather than being handed the location (silent scanning,
-    // "no clues"). It stays clickable, it just isn't telegraphed.
+    // A punctuation gap looks exactly like ordinary spacing (no clues); it stays
+    // a lasso-able / focusable target.
     el.className = token.isGap ? "token token--gap" : "token";
     el.dataset.text = token.text;
-    // Render the gap as a thin non-breaking space so a click still has a target
-    // but nothing visually distinguishes it from the surrounding whitespace.
+    el.dataset.index = String(token.index);
     el.textContent = token.isGap ? "\u00A0" : token.text;
     el.setAttribute("role", "button");
     el.setAttribute("tabindex", "0");
-    // Keep the accessible label neutral: it must not announce "missing
-    // punctuation" and give the answer away to screen-reader users either.
+    el.setAttribute("aria-pressed", "false");
+    // Keep the accessible label neutral: never announce which spots are errors.
     el.setAttribute("aria-label", token.isGap ? "gap" : token.text);
-    el.addEventListener("click", (e) => {
-      e.stopPropagation();
-      onClick(el, token);
-    });
     el.addEventListener("keydown", (e) => {
       if (e.key === "Enter" || e.key === " ") {
         e.preventDefault();
-        onClick(el, token);
+        onKeyToggle(token.index);
       }
     });
+    tokenEls.set(token.index, el);
     target.appendChild(el);
     // Preserve spacing between word tokens (gaps blend into the spacing).
     target.appendChild(document.createTextNode(" "));
   }
 }
 
-/** Encouraging, non-shaming per-question note. */
-function encouragement(got: number, total: number): string {
-  if (total === 0) return "Every paper sharpens your eye. On to the next!";
-  if (got >= total) return "Flawless marking — that red pen is on fire!";
-  if (got > 0) return "Nice work spotting some. The rest are just clues for next time.";
-  return "Tricky one! No shame — you'll spot these faster with practice.";
+/** Serialise loop points to an SVG polyline "points" attribute. */
+function pointsToAttr(points: readonly Point[]): string {
+  return points.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");
 }
 
-/** Simple, cheap distractors for word-type errors (kept plausible). */
-function wordDistractors(error: GrammarError): string[] {
-  // Generic close alternates so the dropdown always has choices; the correct
-  // fix is guaranteed present by the caller.
-  const pool: Record<string, string[]> = {
-    at: ["to", "in", "on"],
-    on: ["in", "at", "to"],
-    went: ["go", "gone", "going"],
-    played: ["play", "plays", "playing"],
-    She: ["Me", "Her", "Him"],
-    "have been": ["is", "was", "are"],
+/**
+ * Build a slightly irregular closed-ellipse path so the ink looks hand-drawn
+ * rather than a perfect vector oval. Deterministic per seed so a paper's marks
+ * do not jitter when re-rendered on a flip-back.
+ */
+function roughEllipsePath(
+  cx: number,
+  cy: number,
+  rx: number,
+  ry: number,
+  seed: number,
+): string {
+  const steps = 24;
+  // A cheap deterministic pseudo-random from the seed + step.
+  const wobble = (i: number): number => {
+    const s = Math.sin((seed + 1) * 12.9898 + i * 78.233) * 43758.5453;
+    return (s - Math.floor(s) - 0.5) * 2; // -1..1
   };
-  return pool[error.fix] ?? ["is", "was", "the", "a"];
+  // Start slightly before 0 and overshoot past 2pi so the loop visibly closes
+  // with a little tail, like a real pen circle.
+  const start = -0.25;
+  const end = Math.PI * 2 + 0.35;
+  const pts: string[] = [];
+  for (let i = 0; i <= steps; i++) {
+    const t = start + ((end - start) * i) / steps;
+    const jitterR = 1 + wobble(i) * 0.06;
+    const x = cx + Math.cos(t) * rx * jitterR;
+    const y = cy + Math.sin(t) * ry * jitterR;
+    pts.push(`${i === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`);
+  }
+  return pts.join(" ");
 }
 
-/** Fisher-Yates shuffle (new array). */
-function shuffle<T>(arr: T[]): T[] {
-  const a = [...arr];
-  for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [a[i], a[j]] = [a[j], a[i]];
-  }
-  return a;
+const INK_LINES = [
+  "Circled. Trust that instinct, examiner.",
+  "Red pen strikes! Keep scanning.",
+  "Marked for review. On you go.",
+  "Nice loop. Anything else catch your eye?",
+  "Flagged. The report card will tell all.",
+];
+function pickInkLine(): string {
+  return INK_LINES[Math.floor(Math.random() * INK_LINES.length)];
 }
 
 /** Escape user/data text before inserting into innerHTML. */

@@ -217,7 +217,7 @@ img,
 }
 
 /* =========================================================================
-   FEAT-003 — gameplay screens (title how-to, marking, essay, grade overlay)
+   FEAT-003 gameplay screens (title how-to, lasso marking, essay free-for-all)
    ========================================================================= */
 
 /* ---- Title: how-to-play list ---- */
@@ -305,7 +305,7 @@ img,
   margin: 0;
 }
 
-/* ---- Clickable tokens ---- */
+/* ---- Lasso-able tokens ---- */
 .token {
   cursor: pointer;
   position: relative;
@@ -327,84 +327,13 @@ img,
 /*
  * Punctuation gap: deliberately indistinguishable from ordinary inter-word
  * spacing. The brief wants silent scanning with "no clues", so a missing mark
- * must NOT be telegraphed by a dashed slot or marker — the player has to notice
- * the sentence reads wrong. The span stays clickable (and reveals a hover/focus
+ * must NOT be telegraphed by a dashed slot or marker; the player has to notice
+ * the sentence reads wrong. The span stays lasso-able (and reveals a hover/focus
  * cue only once the player actively probes it, which is the detective action),
  * but at rest it is just whitespace.
  */
 .token--gap {
   display: inline;
-}
-
-/* Correct fix — green ink, gentle. */
-.token--correct {
-  background-color: rgba(61, 122, 58, 0.28);
-  color: var(--grade-green);
-  text-decoration: underline wavy var(--grade-green);
-}
-
-/* Wrong fix — muted amber, NOT an aggressive red (non-shaming). */
-.token--wrong {
-  background-color: rgba(201, 162, 39, 0.3);
-  color: var(--ink-soft);
-  text-decoration: underline dotted var(--brass);
-}
-
-.token--resolved {
-  cursor: default;
-}
-
-/* Harmless miss — a soft, brief pulse, no scary colour. */
-.token--miss {
-  animation: token-miss 0.5s ease;
-}
-
-@keyframes token-miss {
-  0% { background-color: rgba(90, 70, 50, 0.25); }
-  100% { background-color: transparent; }
-}
-
-.token--active {
-  background-color: rgba(201, 162, 39, 0.35);
-}
-
-/* ---- Correction popover (spelling / word dropdown) ---- */
-.popover {
-  position: absolute;
-  top: 100%;
-  left: 50%;
-  transform: translateX(-50%);
-  margin-top: 6px;
-  z-index: 20;
-  background: var(--paper-light);
-  border: var(--edge) solid var(--ink);
-  box-shadow: 4px 4px 0 rgba(0, 0, 0, 0.35);
-  display: flex;
-  flex-direction: column;
-  min-width: 120px;
-  max-width: 220px;
-}
-
-.popover__opt {
-  font-family: var(--font-pixel);
-  font-size: 0.55rem;
-  text-align: left;
-  background: transparent;
-  color: var(--ink);
-  border: none;
-  border-bottom: 1px solid var(--paper-shadow);
-  padding: 0.6rem 0.75rem;
-  cursor: pointer;
-}
-
-.popover__opt:last-child {
-  border-bottom: none;
-}
-
-.popover__opt:hover,
-.popover__opt:focus-visible {
-  background: var(--brass);
-  outline: none;
 }
 
 /* ---- Timer row ---- */
@@ -454,60 +383,6 @@ img,
   opacity: 1;
 }
 
-/* ---- Grade overlay (per-question result) ---- */
-.grade-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(30, 20, 12, 0.72);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 1rem;
-  z-index: 50;
-  animation: overlay-in 0.2s ease;
-}
-
-@keyframes overlay-in {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-
-.grade-overlay__card {
-  background-color: var(--paper);
-  border: var(--edge) double var(--ink);
-  box-shadow: 8px 8px 0 rgba(0, 0, 0, 0.4);
-  padding: 2rem;
-  max-width: 460px;
-  width: 100%;
-  text-align: center;
-}
-
-.grade-overlay__stamp {
-  font-size: 1rem;
-  margin-bottom: 1.25rem;
-  animation: stamp-in 0.3s cubic-bezier(0.2, 1.4, 0.4, 1);
-}
-
-@keyframes stamp-in {
-  from { transform: rotate(-8deg) scale(2.2); opacity: 0; }
-  to { transform: rotate(-8deg) scale(1); opacity: 1; }
-}
-
-.grade-overlay__caught,
-.grade-overlay__cats {
-  font-family: var(--font-pixel);
-  font-size: 0.6rem;
-  line-height: 1.9;
-  margin: 0.5rem 0;
-}
-
-.grade-overlay__note {
-  font-family: var(--font-hand);
-  font-size: 1.35rem;
-  color: var(--ink-soft);
-  margin: 1rem 0 1.5rem;
-}
-
 /* ---- Essay free-for-all ---- */
 .essay__hint {
   color: var(--wax-red);
@@ -554,6 +429,318 @@ img,
   font-size: 0.55rem;
   color: var(--paper-shadow);
   margin-right: auto;
+}
+
+/* =========================================================================
+   FEAT-002 - Lasso circling, page flipping, and game-feel
+   =========================================================================
+   The examiner draws a freehand red-pen loop over the answer. Hand-authored
+   CSS/SVG only (no external art). Decorative overlays stay pointer-events:none
+   so they never block the lasso capture layer. */
+
+/* ---- Lasso stage: the answer plus its transparent ink capture layer ---- */
+.lasso-stage {
+  position: relative;
+  /* A pen gesture is not a text selection: block the browser's drag-to-select
+     and touch scrolling so a loop feels like drawing, not highlighting. */
+  -webkit-user-select: none;
+  user-select: none;
+  touch-action: none;
+  cursor: crosshair;
+}
+
+/* The SVG layer sits on top of the words and receives the pointer strokes.
+   It must span the whole stage; the ink itself is drawn into it. */
+.lasso-layer {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  /* The layer captures nothing itself - the stage owns the pointer listeners -
+     so let events fall through to the stage for a single, simple capture path. */
+  pointer-events: none;
+  overflow: visible;
+}
+
+/* Live freehand stroke while the pen is down: a rough, semi-transparent red. */
+.ink-stroke {
+  fill: none;
+  stroke: var(--wax-red);
+  stroke-width: 3.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0.72;
+}
+
+/* Persistent circle drawn around a marked word: organic, hand-drawn red pen. */
+.ink-circle {
+  fill: none;
+  stroke: var(--wax-red);
+  stroke-width: 2.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0.85;
+  /* A faint second pass would need duplicated nodes; instead a soft shadow
+     fakes the slight double-ink of a real looping pen. */
+  filter: drop-shadow(0.6px 0.8px 0 rgba(161, 18, 31, 0.35));
+}
+
+/* A circled token: NO right/wrong colour (that stays hidden until grading).
+   Just a gentle warm tint so the loop reads as "flagged", nothing more. */
+.token--circled {
+  background-color: rgba(161, 18, 31, 0.08);
+}
+
+/* ---- Page-flip / paper-stack controls ---- */
+.marking__pager {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  width: 100%;
+  max-width: 640px;
+  justify-content: space-between;
+}
+
+.btn--ghost {
+  background: transparent;
+  color: var(--paper-light);
+  border: var(--edge) solid var(--paper-shadow);
+  box-shadow: 3px 3px 0 var(--desk-edge);
+  font-size: 0.55rem;
+  padding: 0.6rem 0.9rem;
+}
+
+.btn--ghost:hover {
+  background: rgba(255, 253, 245, 0.12);
+}
+
+.btn--ghost:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+/* ---- Combo / momentum callout ---- */
+.combo-meter {
+  font-family: var(--font-pixel);
+  font-size: 0.6rem;
+  color: var(--brass);
+  text-align: center;
+  min-width: 6ch;
+  min-height: 1em;
+  text-shadow: 2px 2px 0 var(--desk-edge);
+}
+
+.combo-meter--pop {
+  animation: combo-pop 0.4s cubic-bezier(0.2, 1.5, 0.4, 1);
+}
+
+@keyframes combo-pop {
+  0% { transform: scale(0.4) rotate(-6deg); opacity: 0; }
+  60% { transform: scale(1.35) rotate(3deg); opacity: 1; }
+  100% { transform: scale(1) rotate(0); opacity: 1; }
+}
+
+/* ---- Stress lines: a red vignette that closes in as the clock drains ---- */
+.stress-lines {
+  position: fixed;
+  inset: 0;
+  z-index: 5;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.4s ease;
+  /* A vignette plus faint diagonal "pressure" hatching, all hand-authored. */
+  background:
+    repeating-linear-gradient(
+      45deg,
+      rgba(161, 18, 31, 0.05) 0px,
+      rgba(161, 18, 31, 0.05) 2px,
+      transparent 2px,
+      transparent 22px
+    ),
+    radial-gradient(
+      ellipse at center,
+      transparent 52%,
+      rgba(111, 11, 21, 0.28) 84%,
+      rgba(111, 11, 21, 0.5) 100%
+    );
+}
+
+.stress-lines--on {
+  opacity: 1;
+  animation: stress-pulse 1.1s ease-in-out infinite;
+}
+
+@keyframes stress-pulse {
+  0%, 100% { opacity: 0.75; }
+  50% { opacity: 1; }
+}
+
+/* When time is short the whole desk tightens (drop-shadow flares red). */
+.desk--stressed .timer-bar__fill {
+  background: var(--wax-red);
+}
+
+/* A short desk shake to punctuate a combo, kept subtle so it is not jarring. */
+.desk--shake {
+  animation: desk-shake 0.32s ease;
+}
+
+@keyframes desk-shake {
+  0% { transform: translate(0, 0); }
+  25% { transform: translate(-3px, 1px); }
+  50% { transform: translate(2px, -2px); }
+  75% { transform: translate(-2px, 2px); }
+  100% { transform: translate(0, 0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .combo-meter--pop,
+  .desk--shake,
+  .stress-lines--on {
+    animation: none;
+  }
+}
+
+/* =========================================================================
+   FEAT-003 - Arcade game-feel: urgent timer, intensifying stress, splatter
+   =========================================================================
+   Polishes the FEAT-002 juice. All hand-authored CSS in the --wax-red /
+   pixel-art palette; decorative overlays stay pointer-events:none. Heavy motion
+   is gated behind prefers-reduced-motion at the foot of this block. */
+
+/* ---- Timer urgency escalation: calm -> amber -> red pulse -> fast pulse ----
+   Driven by the marking screen toggling classes as the seconds count down.
+   The bar stays readable at every level (colour + pulse, never a blur). */
+.timer-bar {
+  transition:
+    box-shadow 0.3s ease,
+    border-color 0.3s ease;
+}
+
+/* Amber: the clock is getting tight but not yet dire. */
+.timer-bar--amber .timer-bar__fill {
+  background: repeating-linear-gradient(
+    45deg,
+    var(--brass),
+    var(--brass) 8px,
+    #b8860b 8px,
+    #b8860b 16px
+  );
+}
+
+/* Urgent (<= ~10s): solid red that pulses. */
+.timer-bar--urgent {
+  border-color: var(--wax-red);
+  box-shadow: 0 0 0 2px rgba(161, 18, 31, 0.35);
+  animation: timer-pulse 1s ease-in-out infinite;
+}
+
+.timer-bar--urgent .timer-bar__fill {
+  background: var(--wax-red);
+}
+
+/* Critical (<= ~5s): the pulse accelerates and flares brighter. */
+.timer-bar--critical {
+  border-color: var(--wax-red);
+  box-shadow: 0 0 0 3px rgba(161, 18, 31, 0.55);
+  animation: timer-pulse 0.42s ease-in-out infinite;
+}
+
+.timer-bar--critical .timer-bar__fill {
+  background: var(--wax-red);
+}
+
+@keyframes timer-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 2px rgba(161, 18, 31, 0.3);
+  }
+  50% {
+    box-shadow: 0 0 10px 3px rgba(161, 18, 31, 0.7);
+  }
+}
+
+/* ---- Stress lines that INTENSIFY as time runs low ----
+   The marking screen sets --stress (0..1) as the clock drains below the stress
+   threshold. Opacity and the vignette weight ramp with it, so the tension
+   visibly builds instead of snapping on. Base opacity keeps it readable. */
+.stress-lines {
+  --stress: 0;
+}
+
+.stress-lines--on {
+  /* 0.55 floor at threshold, climbing to full as time approaches zero. */
+  opacity: calc(0.55 + 0.45 * var(--stress));
+}
+
+/* A deeper, redder inner vignette fades in with intensity for the final push. */
+.stress-lines--on::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: var(--stress);
+  background: radial-gradient(
+    ellipse at center,
+    transparent 40%,
+    rgba(111, 11, 21, 0.35) 90%,
+    rgba(111, 11, 21, 0.65) 100%
+  );
+}
+
+/* ---- Ink splatter / combo burst flourish ----
+   Thrown at a circled word on a marking moment. Purely decorative, so it never
+   captures pointer events and never blocks the lasso capture layer. */
+.ink-splat {
+  position: absolute;
+  width: 40px;
+  height: 40px;
+  margin: -20px 0 0 -20px; /* centre on the given point */
+  pointer-events: none;
+  z-index: 3;
+  animation: ink-splat-burst 0.6s ease-out forwards;
+}
+
+.ink-splat__svg {
+  width: 100%;
+  height: 100%;
+}
+
+@keyframes ink-splat-burst {
+  0% {
+    transform: scale(calc(0.3 * var(--splat-scale, 1))) rotate(-8deg);
+    opacity: 0;
+  }
+  30% {
+    transform: scale(var(--splat-scale, 1)) rotate(4deg);
+    opacity: 0.9;
+  }
+  100% {
+    transform: scale(calc(1.25 * var(--splat-scale, 1))) rotate(0deg);
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* Soften/disable heavy motion; the loop stays fully playable. The timer still
+     changes COLOUR for urgency (readable, non-motion), just without the pulse. */
+  .timer-bar--urgent,
+  .timer-bar--critical {
+    animation: none;
+  }
+  .stress-lines--on {
+    /* Steady, gentle tint instead of a ramping/pulsing vignette. */
+    opacity: 0.7;
+  }
+  .stress-lines--on::after {
+    opacity: 0.4;
+  }
+  .ink-splat {
+    /* Show a brief static splatter, no scaling burst. */
+    animation: none;
+    opacity: 0.85;
+  }
 }
 
 /* =========================================================================
@@ -695,6 +882,72 @@ img,
   font-size: 0.5rem;
   color: var(--wax-red);
   margin-left: 0.4rem;
+}
+
+/* ---- Circle accuracy: hits / misses / false alarms ---- */
+.report__accuracy-note {
+  font-family: var(--font-hand);
+  font-size: 1.15rem;
+  color: var(--ink-soft);
+  margin: 0 0 0.75rem;
+}
+
+.report__circle-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.75rem;
+}
+
+.report__circle-stat {
+  background: var(--paper-light);
+  border: 2px solid var(--ink);
+  box-shadow: 3px 3px 0 rgba(0, 0, 0, 0.2);
+  padding: 0.75rem 0.5rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.3rem;
+  text-align: center;
+}
+
+.report__circle-stat--hits {
+  border-color: var(--grade-green);
+}
+
+.report__circle-stat--false {
+  border-color: var(--brass);
+}
+
+.report__circle-value {
+  font-family: var(--font-pixel);
+  font-size: 1.1rem;
+  color: var(--ink);
+}
+
+.report__circle-stat--hits .report__circle-value {
+  color: var(--grade-green);
+}
+
+.report__circle-label {
+  font-family: var(--font-pixel);
+  font-size: 0.5rem;
+  color: var(--ink);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.report__circle-sub {
+  font-family: var(--font-hand);
+  font-size: 1rem;
+  color: var(--ink-soft);
+  line-height: 1.2;
+}
+
+.report__circle-cheer {
+  font-family: var(--font-hand);
+  font-size: 1.2rem;
+  color: var(--ink);
+  margin: 0.85rem 0 0;
 }
 
 /* ---- Skills / checklist ---- */

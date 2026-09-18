@@ -44,6 +44,31 @@ export const stackedBooksSvg = `
   <rect x="11" y="5" width="1" height="4" fill="#c9a227"/>
 </svg>`;
 
+/**
+ * A red ink splatter / combo burst, drawn as chunky pixel blobs radiating from
+ * the centre. Purely decorative game-feel flourish thrown when the examiner
+ * circles a word. Original hand-authored pixel art in the --wax-red palette; it
+ * carries no correctness meaning. Rendered pointer-events:none by its wrapper.
+ */
+export const inkSplatSvg = `
+<svg class="ink-splat__svg pixelated" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg" shape-rendering="crispEdges" role="img" aria-label="ink splatter">
+  <!-- core blob -->
+  <rect x="6" y="6" width="4" height="4" fill="#a1121f"/>
+  <rect x="7" y="5" width="2" height="1" fill="#c7404b"/>
+  <rect x="7" y="10" width="2" height="1" fill="#c7404b"/>
+  <rect x="5" y="7" width="1" height="2" fill="#c7404b"/>
+  <rect x="10" y="7" width="1" height="2" fill="#c7404b"/>
+  <!-- flung droplets -->
+  <rect x="2" y="3" width="2" height="2" fill="#a1121f"/>
+  <rect x="12" y="2" width="1" height="1" fill="#c7404b"/>
+  <rect x="13" y="4" width="2" height="2" fill="#a1121f"/>
+  <rect x="1" y="9" width="1" height="1" fill="#c7404b"/>
+  <rect x="3" y="12" width="2" height="2" fill="#a1121f"/>
+  <rect x="11" y="12" width="2" height="2" fill="#a1121f"/>
+  <rect x="14" y="10" width="1" height="1" fill="#c7404b"/>
+  <rect x="8" y="1" width="1" height="1" fill="#a1121f"/>
+</svg>`;
+
 /** A report card with a red grade stamp. */
 export const reportCardSvg = `
 <svg class="desk-prop pixelated" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg" shape-rendering="crispEdges" role="img" aria-label="report card">

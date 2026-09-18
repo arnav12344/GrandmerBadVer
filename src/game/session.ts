@@ -1,11 +1,11 @@
 /*
- * Grandmer — session / game-state machine (FEAT-002).
+ * Grandmer — session / game-state machine (FEAT-001 rework).
  *
- * Pure, framework-free state for a full marking run. Tracks the current
- * question, elapsed time per question, recorded actions with timestamps, and
- * the running score. The per-question countdown itself is driven by the UI;
- * the state transitions ("timer ran out -> grade this question -> advance")
- * live here. Produces the final signed ReportCard.
+ * Pure, framework-free state for a full marking run. Tracks the current paper,
+ * elapsed time per paper, recorded circles with timestamps, and whether the run
+ * is finished. Grading is DEFERRED: the student can flip back and forth between
+ * papers and revise their circles, and nothing is graded until the run is
+ * finished. Produces the final signed ReportCard.
  */
 
 import {
@@ -16,13 +16,17 @@ import {
   computeSectionScores,
   computeSpeed,
   computeTotalScore,
+  countFalseAlarms,
+  countHits,
+  countMisses,
   recordAction,
+  totalErrors as totalRealErrors,
   strongestTopic,
   weakestTopic,
 } from "./scoring";
 import type {
   AnyQuestion,
-  Grade,
+  Question,
   RecordedAction,
   ReportCard,
 } from "./types";
@@ -30,13 +34,13 @@ import type {
 /** Immutable-ish snapshot of a marking session. */
 export interface GameState {
   questions: readonly AnyQuestion[];
-  /** Index into questions of the question currently being marked. */
+  /** Index into questions of the paper currently being marked / reviewed. */
   currentIndex: number;
-  /** All actions recorded so far, in order. */
+  /** All circles recorded so far, in order. */
   actions: readonly RecordedAction[];
-  /** Milliseconds spent on each finished question, keyed by question id. */
+  /** Milliseconds spent on each paper, keyed by question id. */
   elapsedByQuestion: Readonly<Record<string, number>>;
-  /** True once the final question has been graded. */
+  /** True once the run has been finished (grading happens only then). */
   finished: boolean;
 }
 
@@ -51,12 +55,12 @@ export function createSession(questions: readonly AnyQuestion[]): GameState {
   };
 }
 
-/** The question currently being marked, or undefined if finished. */
+/** The paper currently being marked, or undefined if none. */
 export function currentQuestion(state: GameState): AnyQuestion | undefined {
   return state.questions[state.currentIndex];
 }
 
-/** Record a single player action, returning a new state (pure). */
+/** Record a single player action (a resolved circle), returning a new state. */
 export function applyAction(
   state: GameState,
   action: RecordedAction,
@@ -65,65 +69,136 @@ export function applyAction(
 }
 
 /**
- * Grade the current question and advance to the next one. Called by the UI
- * when the per-question timer runs out (or the player ticks "next"). Records
- * how long the question took. When the last question is graded, marks the
- * session finished.
+ * Find the error (if any) at a token index within a standard paper. Used to
+ * resolve a circle to a hit or a false alarm at record time.
  */
-export function gradeAndAdvance(
-  state: GameState,
-  elapsedMs: number,
-): GameState {
-  const question = currentQuestion(state);
-  if (!question || state.finished) {
-    return state;
-  }
-
-  const elapsedByQuestion = {
-    ...state.elapsedByQuestion,
-    [question.id]: elapsedMs,
-  };
-  const nextIndex = state.currentIndex + 1;
-  const finished = nextIndex >= state.questions.length;
-
-  return {
-    ...state,
-    elapsedByQuestion,
-    currentIndex: finished ? state.currentIndex : nextIndex,
-    finished,
-  };
+function errorAtToken(
+  question: Question,
+  tokenIndex: number,
+): Question["errors"][number] | undefined {
+  return question.errors.find((e) => e.tokenIndex === tokenIndex);
 }
 
 /**
- * Grade for a single question, measured against the errors actually present in
- * the paper — not just the ones the player chose to engage with. Catching 1 of
- * N errors and ignoring the rest must NOT grade as 100%; the stamp has to match
- * the "caught X of N" line shown beside it. Incorrect fixes also count against
- * the paper. The essay (no hidden-error set) has no meaningful grade, so it
- * returns the bottom band without penalising the run.
+ * Toggle a circle on a token of the CURRENT paper. Circling revises freely:
+ * circling a token that is already circled REMOVES it (revisable), otherwise it
+ * records a new circle resolved to a hit or a false alarm. Returns a new state.
+ * Circles on the essay (no answer key) are recorded but ungraded.
  */
-export function gradeForQuestion(
+export function toggleCircle(
+  state: GameState,
+  tokenIndex: number,
+  timestamp: number = Date.now(),
+): GameState {
+  const question = currentQuestion(state);
+  if (!question) return state;
+
+  const existingIndex = state.actions.findIndex(
+    (a) => a.questionId === question.id && a.tokenIndex === tokenIndex,
+  );
+  if (existingIndex !== -1) {
+    // Re-circling the same token removes it.
+    const actions = state.actions.filter((_, i) => i !== existingIndex);
+    return { ...state, actions };
+  }
+
+  if (question.kind === "essay") {
+    // The essay is ungraded; record the circle as an inert note for the record.
+    return applyAction(state, {
+      questionId: question.id,
+      category: null,
+      outcome: "note",
+      tokenIndex,
+      timestamp,
+    });
+  }
+
+  const error = errorAtToken(question, tokenIndex);
+  return applyAction(state, {
+    questionId: question.id,
+    category: error ? error.category : null,
+    outcome: error ? "hit" : "false-alarm",
+    tokenIndex,
+    errorId: error?.id,
+    timestamp,
+  });
+}
+
+/** The token indices currently circled on the given paper. */
+export function circledTokens(
   state: GameState,
   questionId: string,
-): Grade {
-  const question = state.questions.find((q) => q.id === questionId);
-  const totalErrors =
-    question && question.kind === "standard" ? question.errors.length : 0;
-  if (totalErrors === 0) {
-    return assignGrade(0);
-  }
-  const correct = state.actions.filter(
-    (a) => a.questionId === questionId && a.outcome === "correct",
-  ).length;
-  // Cap at the number of real errors so re-clicks can't push past 100%.
-  const caught = Math.min(correct, totalErrors);
-  const percent = (caught / totalErrors) * 100;
-  return assignGrade(percent);
+): number[] {
+  return state.actions
+    .filter((a) => a.questionId === questionId && a.tokenIndex !== undefined)
+    .map((a) => a.tokenIndex as number);
+}
+
+/**
+ * Jump to an arbitrary paper index WITHOUT grading (page flipping). Records how
+ * long the paper being left was viewed by ADDING to its elapsed total. Ignored
+ * once the run is finished or when the index is out of range.
+ */
+export function goToQuestion(
+  state: GameState,
+  index: number,
+  elapsedMs = 0,
+): GameState {
+  if (state.finished) return state;
+  if (index < 0 || index >= state.questions.length) return state;
+  if (index === state.currentIndex) return state;
+
+  const leaving = state.questions[state.currentIndex];
+  const elapsedByQuestion = leaving
+    ? {
+        ...state.elapsedByQuestion,
+        [leaving.id]: (state.elapsedByQuestion[leaving.id] ?? 0) + elapsedMs,
+      }
+    : state.elapsedByQuestion;
+
+  return { ...state, currentIndex: index, elapsedByQuestion };
+}
+
+/** Flip to the next paper without grading (clamped at the last paper). */
+export function nextQuestion(state: GameState, elapsedMs = 0): GameState {
+  return goToQuestion(
+    state,
+    Math.min(state.currentIndex + 1, state.questions.length - 1),
+    elapsedMs,
+  );
+}
+
+/** Flip to the previous paper without grading (clamped at the first paper). */
+export function prevQuestion(state: GameState, elapsedMs = 0): GameState {
+  return goToQuestion(state, Math.max(state.currentIndex - 1, 0), elapsedMs);
+}
+
+/**
+ * Finish the run. Grading only happens after this. Records elapsed time on the
+ * current paper and marks the session finished. Idempotent once finished.
+ */
+export function finishRun(state: GameState, elapsedMs = 0): GameState {
+  if (state.finished) return state;
+  const current = currentQuestion(state);
+  const elapsedByQuestion = current
+    ? {
+        ...state.elapsedByQuestion,
+        [current.id]: (state.elapsedByQuestion[current.id] ?? 0) + elapsedMs,
+      }
+    : state.elapsedByQuestion;
+  return { ...state, elapsedByQuestion, finished: true };
 }
 
 /**
  * Produce the final Report Card from the accumulated state. `signature` is the
  * student's name written on the card by the UI (defaults to empty until signed).
+ *
+ * Overall percent = distinct caught errors / total real errors across all
+ * papers. Both halves are derived from the SAME distinct-caught-errorId set
+ * that countMisses uses (real errors = caught + missed), so the overall percent
+ * provably agrees with the section and topic views instead of relying on the
+ * raw hit-action count happening to equal the distinct-caught count. `hits`
+ * (the raw hit-action count) is still reported as a standalone stat.
  */
 export function buildReportCard(
   state: GameState,
@@ -132,33 +207,33 @@ export function buildReportCard(
   const { actions, questions } = state;
 
   const sectionScores = computeSectionScores(questions, actions);
-  // Overall grade is caught-vs-total across every hidden error in the papers,
-  // consistent with per-question grading. Engaging little but accurately must
-  // not post a high overall grade when most errors were left uncaught. The
-  // essay (free-for-all, no answer key) contributes no gradable errors.
-  const totalErrors = questions.reduce(
-    (sum, q) => sum + (q.kind === "standard" ? q.errors.length : 0),
-    0,
-  );
-  const correctCount = actions.filter((a) => a.outcome === "correct").length;
-  const caught = Math.min(correctCount, totalErrors);
+
+  const hits = countHits(actions);
+  const misses = countMisses(questions, actions);
+  const falseAlarms = countFalseAlarms(actions);
+  // Distinct real errors that were caught, from the same set countMisses uses.
+  const caught = totalRealErrors(questions) - misses;
+  const totalErrors = caught + misses; // every real error is either caught or missed
   const overallPercent =
     totalErrors === 0 ? 0 : Math.round((caught / totalErrors) * 100);
+
   const { bestCombo, bonus } = computeBestCombo(actions);
-  const wrongActions = actions.filter((a) => a.outcome === "incorrect");
 
   return {
     sectionScores,
     totalScore: computeTotalScore(actions),
     overallPercent,
     overallGrade: assignGrade(overallPercent),
-    accuracy: computeAccuracy(actions),
+    accuracy: computeAccuracy(actions, questions),
     speedMsPerAction: computeSpeed(actions),
     bestCombo,
     comboBonus: bonus,
-    strongestTopic: strongestTopic(actions),
-    weakestTopic: weakestTopic(actions),
-    retryLearning: buildRetryLearning(wrongActions, questions),
+    strongestTopic: strongestTopic(questions, actions),
+    weakestTopic: weakestTopic(questions, actions),
+    retryLearning: buildRetryLearning(questions, actions),
+    hits,
+    misses,
+    falseAlarms,
     studentSignature: signature,
   };
 }

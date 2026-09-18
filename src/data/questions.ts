@@ -108,7 +108,7 @@ export const QUESTIONS: readonly AnyQuestion[] = [
     ],
   },
 
-  // ---- Section C: Spelling (dropdown) ----
+  // ---- Section C: Spelling ----
   {
     kind: "standard",
     id: "q3-spelling",
