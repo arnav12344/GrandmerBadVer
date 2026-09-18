@@ -1,0 +1,903 @@
+/*
+ * Grandmer — pixel-art teacher's-desk theme.
+ * Parchment / inkwell / quill / stacked-books vibe.
+ * Fonts are self-hosted via @fontsource (OFL) — imported in main.ts.
+ * Reusable classes here are consumed by later screen features.
+ */
+
+:root {
+  /* Old-paper / parchment palette */
+  --paper: #f4e4c1;
+  --paper-light: #fffdf5;
+  --paper-shadow: #e3cea0;
+
+  /* Ink & desk */
+  --ink: #2b2016;
+  --ink-soft: #5a4632;
+  --desk: #6b4a2b;
+  --desk-dark: #4a3218;
+  --desk-edge: #3a2712;
+
+  /* Accents */
+  --wax-red: #a1121f;
+  --wax-red-dark: #6f0b15;
+  --brass: #c9a227;
+  --ink-blue: #2f3d6b;
+  --grade-green: #3d7a3a;
+
+  /* Fonts (families loaded via @fontsource) */
+  --font-pixel: "Press Start 2P", "Courier New", monospace;
+  --font-hand: "Caveat", "Comic Sans MS", cursive;
+
+  --edge: 3px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  min-height: 100%;
+}
+
+body {
+  font-family: var(--font-pixel);
+  color: var(--ink);
+  /* Woodgrain teacher's desk built from layered gradients (hand-authored, no external art). */
+  background-color: var(--desk);
+  background-image:
+    repeating-linear-gradient(
+      90deg,
+      rgba(0, 0, 0, 0.06) 0px,
+      rgba(0, 0, 0, 0.06) 2px,
+      transparent 2px,
+      transparent 8px
+    ),
+    linear-gradient(180deg, var(--desk) 0%, var(--desk-dark) 100%);
+  image-rendering: pixelated;
+  -webkit-font-smoothing: none;
+  font-smooth: never;
+  line-height: 1.6;
+}
+
+/* Crisp pixel scaling for any sprite/image we drop in later. */
+img,
+.pixelated {
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
+
+/* ---- Layout: the desk surface ---- */
+.desk {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1.5rem;
+  padding: 2rem 1rem;
+}
+
+/* ---- Paper card (a student's answer sheet, dialogs, etc.) ---- */
+.paper-card {
+  background-color: var(--paper-light);
+  background-image:
+    linear-gradient(180deg, rgba(0, 0, 0, 0.02), rgba(0, 0, 0, 0.06));
+  color: var(--ink);
+  border: var(--edge) solid var(--ink);
+  box-shadow:
+    6px 6px 0 rgba(0, 0, 0, 0.35),
+    inset 0 0 0 1px var(--paper-shadow);
+  padding: 1.5rem 1.75rem;
+  max-width: 640px;
+  width: 100%;
+}
+
+/* ---- Report card variant ---- */
+.report-card {
+  background-color: var(--paper);
+  border: var(--edge) double var(--ink);
+  box-shadow: 8px 8px 0 rgba(0, 0, 0, 0.4);
+  padding: 2rem;
+  max-width: 680px;
+  width: 100%;
+}
+
+/* ---- Grade stamp (wax-red, tilted) ---- */
+.grade-stamp {
+  display: inline-block;
+  font-family: var(--font-pixel);
+  color: var(--paper-light);
+  background: var(--wax-red);
+  border: var(--edge) solid var(--wax-red-dark);
+  padding: 0.5rem 0.75rem;
+  transform: rotate(-8deg);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  box-shadow: 3px 3px 0 rgba(0, 0, 0, 0.3);
+}
+
+/* ---- Handwritten student answer text ---- */
+.handwriting {
+  font-family: var(--font-hand);
+  font-size: 1.6rem;
+  color: var(--ink-blue);
+  line-height: 1.4;
+}
+
+/* ---- Pixel button ---- */
+.btn {
+  font-family: var(--font-pixel);
+  font-size: 0.7rem;
+  color: var(--paper-light);
+  background: var(--wax-red);
+  border: var(--edge) solid var(--ink);
+  padding: 0.85rem 1.25rem;
+  cursor: pointer;
+  box-shadow: 4px 4px 0 var(--desk-edge);
+  transition: transform 0.05s ease, box-shadow 0.05s ease;
+}
+
+.btn:hover {
+  background: var(--wax-red-dark);
+}
+
+.btn:active {
+  transform: translate(4px, 4px);
+  box-shadow: 0 0 0 var(--desk-edge);
+}
+
+.btn--brass {
+  background: var(--brass);
+  color: var(--ink);
+}
+
+/* ---- Timer bar (counts down as the examiner races the clock) ---- */
+.timer-bar {
+  width: 100%;
+  height: 18px;
+  background: var(--desk-dark);
+  border: var(--edge) solid var(--ink);
+  overflow: hidden;
+}
+
+.timer-bar__fill {
+  height: 100%;
+  background: repeating-linear-gradient(
+    45deg,
+    var(--wax-red),
+    var(--wax-red) 8px,
+    var(--wax-red-dark) 8px,
+    var(--wax-red-dark) 16px
+  );
+  transition: width 0.25s linear;
+}
+
+/* ---- Titles ---- */
+.title {
+  font-family: var(--font-pixel);
+  font-size: clamp(1.4rem, 4vw, 2.6rem);
+  color: var(--paper-light);
+  text-shadow: 4px 4px 0 var(--desk-edge);
+  text-align: center;
+  margin: 0;
+}
+
+.subtitle {
+  font-family: var(--font-pixel);
+  font-size: 0.7rem;
+  color: var(--brass);
+  text-align: center;
+  margin: 0;
+}
+
+.byline {
+  font-family: var(--font-pixel);
+  font-size: 0.55rem;
+  color: var(--paper-shadow);
+  text-align: center;
+  margin: 0;
+}
+
+/* ---- Desk clutter row (decorative pixel props) ---- */
+.desk-clutter {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 1.5rem;
+  flex-wrap: wrap;
+}
+
+.desk-prop {
+  width: 96px;
+  height: 96px;
+}
+
+/* =========================================================================
+   FEAT-003 — gameplay screens (title how-to, marking, essay, grade overlay)
+   ========================================================================= */
+
+/* ---- Title: how-to-play list ---- */
+.how-to__title {
+  font-family: var(--font-pixel);
+  font-size: 0.7rem;
+  color: var(--wax-red);
+  margin: 1.25rem 0 0.5rem;
+}
+
+.how-to {
+  font-family: var(--font-pixel);
+  font-size: 0.55rem;
+  line-height: 2;
+  padding-left: 1.2rem;
+  margin: 0;
+}
+
+.how-to li {
+  margin-bottom: 0.35rem;
+}
+
+.how-to__note {
+  font-family: var(--font-hand);
+  font-size: 1.15rem;
+  color: var(--ink-soft);
+  margin: 0.75rem 0 0;
+}
+
+/* ---- Marking layout ---- */
+.desk--marking {
+  justify-content: flex-start;
+  gap: 1rem;
+}
+
+.marking__bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+  max-width: 640px;
+  gap: 1rem;
+  font-family: var(--font-pixel);
+  font-size: 0.55rem;
+}
+
+.marking__section {
+  color: var(--brass);
+}
+
+.marking__count {
+  color: var(--paper-shadow);
+}
+
+.marking__prompt {
+  font-family: var(--font-pixel);
+  font-size: 0.6rem;
+  color: var(--paper-light);
+  max-width: 640px;
+  width: 100%;
+  margin: 0;
+  line-height: 1.8;
+}
+
+.marking__prompt-label {
+  color: var(--brass);
+  display: block;
+  margin-bottom: 0.25rem;
+}
+
+.marking__paper {
+  position: relative;
+}
+
+.marking__hint {
+  font-family: var(--font-pixel);
+  font-size: 0.5rem;
+  color: var(--ink-soft);
+  margin: 0 0 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.marking__answer {
+  margin: 0;
+}
+
+/* ---- Clickable tokens ---- */
+.token {
+  cursor: pointer;
+  position: relative;
+  padding: 0 2px;
+  border-radius: 3px;
+  transition: background-color 0.1s ease, color 0.1s ease;
+  outline: none;
+}
+
+.token:hover,
+.token:focus-visible {
+  background-color: rgba(201, 162, 39, 0.35);
+}
+
+.token:focus-visible {
+  box-shadow: 0 0 0 2px var(--brass);
+}
+
+/*
+ * Punctuation gap: deliberately indistinguishable from ordinary inter-word
+ * spacing. The brief wants silent scanning with "no clues", so a missing mark
+ * must NOT be telegraphed by a dashed slot or marker — the player has to notice
+ * the sentence reads wrong. The span stays clickable (and reveals a hover/focus
+ * cue only once the player actively probes it, which is the detective action),
+ * but at rest it is just whitespace.
+ */
+.token--gap {
+  display: inline;
+}
+
+/* Correct fix — green ink, gentle. */
+.token--correct {
+  background-color: rgba(61, 122, 58, 0.28);
+  color: var(--grade-green);
+  text-decoration: underline wavy var(--grade-green);
+}
+
+/* Wrong fix — muted amber, NOT an aggressive red (non-shaming). */
+.token--wrong {
+  background-color: rgba(201, 162, 39, 0.3);
+  color: var(--ink-soft);
+  text-decoration: underline dotted var(--brass);
+}
+
+.token--resolved {
+  cursor: default;
+}
+
+/* Harmless miss — a soft, brief pulse, no scary colour. */
+.token--miss {
+  animation: token-miss 0.5s ease;
+}
+
+@keyframes token-miss {
+  0% { background-color: rgba(90, 70, 50, 0.25); }
+  100% { background-color: transparent; }
+}
+
+.token--active {
+  background-color: rgba(201, 162, 39, 0.35);
+}
+
+/* ---- Correction popover (spelling / word dropdown) ---- */
+.popover {
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  margin-top: 6px;
+  z-index: 20;
+  background: var(--paper-light);
+  border: var(--edge) solid var(--ink);
+  box-shadow: 4px 4px 0 rgba(0, 0, 0, 0.35);
+  display: flex;
+  flex-direction: column;
+  min-width: 120px;
+  max-width: 220px;
+}
+
+.popover__opt {
+  font-family: var(--font-pixel);
+  font-size: 0.55rem;
+  text-align: left;
+  background: transparent;
+  color: var(--ink);
+  border: none;
+  border-bottom: 1px solid var(--paper-shadow);
+  padding: 0.6rem 0.75rem;
+  cursor: pointer;
+}
+
+.popover__opt:last-child {
+  border-bottom: none;
+}
+
+.popover__opt:hover,
+.popover__opt:focus-visible {
+  background: var(--brass);
+  outline: none;
+}
+
+/* ---- Timer row ---- */
+.marking__timer {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  width: 100%;
+  max-width: 640px;
+}
+
+.marking__timer .timer-bar {
+  flex: 1;
+}
+
+.marking__seconds {
+  font-family: var(--font-pixel);
+  font-size: 0.6rem;
+  color: var(--paper-light);
+  min-width: 3ch;
+  text-align: right;
+}
+
+.marking__actions {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  width: 100%;
+  max-width: 640px;
+  justify-content: flex-end;
+}
+
+/* ---- Transient feedback line ---- */
+.marking__feedback {
+  font-family: var(--font-hand);
+  font-size: 1.25rem;
+  color: var(--paper-light);
+  max-width: 640px;
+  width: 100%;
+  min-height: 1.8em;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  text-align: center;
+}
+
+.marking__feedback--show {
+  opacity: 1;
+}
+
+/* ---- Grade overlay (per-question result) ---- */
+.grade-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(30, 20, 12, 0.72);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  z-index: 50;
+  animation: overlay-in 0.2s ease;
+}
+
+@keyframes overlay-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.grade-overlay__card {
+  background-color: var(--paper);
+  border: var(--edge) double var(--ink);
+  box-shadow: 8px 8px 0 rgba(0, 0, 0, 0.4);
+  padding: 2rem;
+  max-width: 460px;
+  width: 100%;
+  text-align: center;
+}
+
+.grade-overlay__stamp {
+  font-size: 1rem;
+  margin-bottom: 1.25rem;
+  animation: stamp-in 0.3s cubic-bezier(0.2, 1.4, 0.4, 1);
+}
+
+@keyframes stamp-in {
+  from { transform: rotate(-8deg) scale(2.2); opacity: 0; }
+  to { transform: rotate(-8deg) scale(1); opacity: 1; }
+}
+
+.grade-overlay__caught,
+.grade-overlay__cats {
+  font-family: var(--font-pixel);
+  font-size: 0.6rem;
+  line-height: 1.9;
+  margin: 0.5rem 0;
+}
+
+.grade-overlay__note {
+  font-family: var(--font-hand);
+  font-size: 1.35rem;
+  color: var(--ink-soft);
+  margin: 1rem 0 1.5rem;
+}
+
+/* ---- Essay free-for-all ---- */
+.essay__hint {
+  color: var(--wax-red);
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 0.55rem;
+  line-height: 1.8;
+}
+
+.essay__answer {
+  line-height: 1.7;
+}
+
+.essay__word--marked {
+  background-color: rgba(161, 18, 31, 0.18);
+  text-decoration: underline wavy var(--wax-red);
+  border-radius: 3px;
+}
+
+.essay__focus {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  max-width: 640px;
+  font-family: var(--font-pixel);
+  font-size: 0.5rem;
+}
+
+.essay__focus-label {
+  color: var(--brass);
+}
+
+.essay__chip {
+  background: var(--ink-blue);
+  color: var(--paper-light);
+  border: 2px solid var(--ink);
+  padding: 0.3rem 0.5rem;
+}
+
+.essay__count {
+  font-family: var(--font-pixel);
+  font-size: 0.55rem;
+  color: var(--paper-shadow);
+  margin-right: auto;
+}
+
+/* =========================================================================
+   FEAT-004 — Report Card & Leaderboard payoff screens
+   ========================================================================= */
+
+/* ---- Report / leaderboard layout: top-aligned, scrollable ---- */
+.desk--report {
+  justify-content: flex-start;
+  gap: 1.25rem;
+}
+
+/* ---- Report card ---- */
+.report__stamp-row {
+  display: flex;
+  justify-content: center;
+  margin-top: 0.5rem;
+}
+
+.report__grade {
+  font-size: 1rem;
+  animation: stamp-in 0.35s cubic-bezier(0.2, 1.4, 0.4, 1);
+}
+
+.report__card {
+  max-width: 720px;
+}
+
+.report__head {
+  text-align: center;
+  border-bottom: 2px dashed var(--ink-soft);
+  padding-bottom: 1rem;
+  margin-bottom: 1rem;
+}
+
+.report__title {
+  font-family: var(--font-pixel);
+  font-size: 1rem;
+  color: var(--wax-red);
+  margin: 0;
+}
+
+.report__sub {
+  font-family: var(--font-pixel);
+  font-size: 0.5rem;
+  color: var(--ink-soft);
+  margin: 0.4rem 0 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.report__overall {
+  font-family: var(--font-pixel);
+  font-size: 0.6rem;
+  color: var(--ink);
+  margin: 0;
+  line-height: 1.9;
+}
+
+.report__block {
+  margin-bottom: 1.5rem;
+}
+
+.report__h2 {
+  font-family: var(--font-pixel);
+  font-size: 0.65rem;
+  color: var(--ink-blue);
+  border-left: 4px solid var(--brass);
+  padding-left: 0.5rem;
+  margin: 0 0 0.75rem;
+}
+
+/* ---- Section score table ---- */
+.report__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--font-pixel);
+  font-size: 0.5rem;
+}
+
+.report__table th,
+.report__table td {
+  text-align: left;
+  padding: 0.4rem 0.5rem;
+  border-bottom: 1px solid var(--paper-shadow);
+}
+
+.report__table th {
+  color: var(--ink-soft);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.report__table td:nth-child(2),
+.report__table td:nth-child(3),
+.report__table th:nth-child(2),
+.report__table th:nth-child(3) {
+  text-align: right;
+  white-space: nowrap;
+}
+
+/* ---- Headline metrics grid ---- */
+.report__metrics {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0.75rem;
+}
+
+.report__metric {
+  background: var(--paper-light);
+  border: 2px solid var(--ink);
+  box-shadow: 3px 3px 0 rgba(0, 0, 0, 0.2);
+  padding: 0.6rem 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.report__metric--combo {
+  grid-column: 1 / -1;
+  border-color: var(--wax-red);
+}
+
+.report__metric-label {
+  font-family: var(--font-pixel);
+  font-size: 0.45rem;
+  color: var(--ink-soft);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.report__metric-value {
+  font-family: var(--font-pixel);
+  font-size: 0.7rem;
+  color: var(--ink);
+}
+
+.report__combo-bonus {
+  font-size: 0.5rem;
+  color: var(--wax-red);
+  margin-left: 0.4rem;
+}
+
+/* ---- Skills / checklist ---- */
+.report__skills,
+.report__checklist {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  font-family: var(--font-pixel);
+  font-size: 0.55rem;
+}
+
+.report__skill {
+  color: var(--grade-green);
+}
+
+.report__check {
+  color: var(--ink);
+}
+
+.report__box {
+  color: var(--wax-red);
+  margin-right: 0.35rem;
+}
+
+.report__skill small,
+.report__check small {
+  color: var(--ink-soft);
+}
+
+.report__empty {
+  font-family: var(--font-hand);
+  font-size: 1.15rem;
+  color: var(--ink-soft);
+  margin: 0;
+}
+
+/* ---- Retry learning ---- */
+.report__retry {
+  padding-left: 1.2rem;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.report__retry-item {
+  border-left: 3px solid var(--brass);
+  padding-left: 0.75rem;
+}
+
+.report__retry-cat {
+  font-family: var(--font-pixel);
+  font-size: 0.5rem;
+  color: var(--ink-blue);
+  margin: 0 0 0.35rem;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.report__retry-section {
+  color: var(--ink-soft);
+}
+
+.report__retry-what {
+  font-family: var(--font-pixel);
+  font-size: 0.55rem;
+  color: var(--ink);
+  margin: 0 0 0.3rem;
+}
+
+.report__retry-why {
+  font-family: var(--font-hand);
+  font-size: 1.2rem;
+  color: var(--ink-soft);
+  margin: 0 0 0.3rem;
+}
+
+.report__retry-res {
+  font-family: var(--font-pixel);
+  font-size: 0.5rem;
+  margin: 0;
+}
+
+.report__retry-res a {
+  color: var(--wax-red);
+}
+
+/* ---- Signature ---- */
+.report__sign {
+  border-top: 2px dashed var(--ink-soft);
+  padding-top: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.report__sign-label {
+  font-family: var(--font-pixel);
+  font-size: 0.5rem;
+  color: var(--ink-soft);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.report__sign-input {
+  font-size: 1.8rem;
+  color: var(--ink-blue);
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid var(--ink-soft);
+  padding: 0.1rem 0.25rem;
+  width: 100%;
+  max-width: 320px;
+}
+
+.report__sign-input:focus {
+  outline: none;
+  border-bottom-color: var(--wax-red);
+}
+
+/* ---- Leaderboard ---- */
+.board__title {
+  font-size: clamp(1rem, 3vw, 1.6rem);
+}
+
+.board__card {
+  max-width: 560px;
+}
+
+.board__flavor {
+  font-size: 1.6rem;
+  color: var(--wax-red);
+  text-align: center;
+  margin: 0 0 1.25rem;
+}
+
+.board__list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.board__row {
+  display: grid;
+  grid-template-columns: 3rem 1fr auto;
+  align-items: center;
+  gap: 0.75rem;
+  font-family: var(--font-pixel);
+  font-size: 0.6rem;
+  padding: 0.55rem 0.6rem;
+  background: var(--paper-light);
+  border: 2px solid var(--ink);
+}
+
+.board__row--you {
+  background: var(--brass);
+  border-color: var(--wax-red);
+  box-shadow: 3px 3px 0 var(--wax-red-dark);
+}
+
+.board__rank {
+  color: var(--ink-soft);
+}
+
+.board__row--you .board__rank {
+  color: var(--wax-red-dark);
+}
+
+.board__name {
+  color: var(--ink);
+}
+
+.board__you-tag {
+  font-size: 0.45rem;
+  color: var(--paper-light);
+  background: var(--wax-red);
+  padding: 0.15rem 0.35rem;
+  margin-left: 0.4rem;
+  text-transform: uppercase;
+}
+
+.board__score {
+  color: var(--ink);
+  text-align: right;
+  white-space: nowrap;
+}
+
+.board__note {
+  font-family: var(--font-hand);
+  font-size: 1.2rem;
+  color: var(--ink-soft);
+  text-align: center;
+  margin: 1.25rem 0 0;
+}
+
+.board__actions {
+  display: flex;
+  gap: 1rem;
+}

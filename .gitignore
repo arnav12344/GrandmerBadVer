@@ -1,0 +1,11 @@
+node_modules/
+dist/
+
+# Logs
+npm-debug.log*
+*.log
+
+# OS / editor cruft
+.DS_Store
+.vscode/
+.idea/

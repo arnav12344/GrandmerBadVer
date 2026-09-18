@@ -1,0 +1,24 @@
+{
+  "name": "grandmer",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Grandmer by Warly Works (for Tuition Masters): a pixel-art English/grammar 'error hunt' detective game. Investor-facing static browser prototype.",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@fontsource/caveat": "^5.1.0",
+    "@fontsource/press-start-2p": "^5.1.0"
+  },
+  "devDependencies": {
+    "happy-dom": "^20.14.5",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.10",
+    "vitest": "^2.1.4"
+  }
+}
